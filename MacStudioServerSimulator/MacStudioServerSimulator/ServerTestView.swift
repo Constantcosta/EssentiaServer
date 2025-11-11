@@ -164,48 +164,6 @@ struct Phase1FeaturesTestView: View {
     }
 }
 
-// MARK: - Models
-
-struct AnalysisResult: Codable {
-    let bpm: Double
-    let bpmConfidence: Double
-    let key: String
-    let keyConfidence: Double
-    let energy: Double
-    let danceability: Double
-    let acousticness: Double
-    let spectralCentroid: Double
-    let analysisDuration: Double
-    let cached: Bool
-    
-    // Phase 1 features (optional for backward compatibility)
-    let timeSignature: String?
-    let valence: Double?
-    let mood: String?
-    let loudness: Double?
-    let dynamicRange: Double?
-    let silenceRatio: Double?
-    
-    enum CodingKeys: String, CodingKey {
-        case bpm
-        case bpmConfidence = "bpm_confidence"
-        case key
-        case keyConfidence = "key_confidence"
-        case energy
-        case danceability
-        case acousticness
-        case spectralCentroid = "spectral_centroid"
-        case analysisDuration = "analysis_duration"
-        case cached
-        case timeSignature = "time_signature"
-        case valence
-        case mood
-        case loudness
-        case dynamicRange = "dynamic_range"
-        case silenceRatio = "silence_ratio"
-    }
-}
-
 #Preview {
     NavigationView {
         ServerTestView()

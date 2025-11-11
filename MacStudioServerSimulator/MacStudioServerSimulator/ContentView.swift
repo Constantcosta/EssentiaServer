@@ -32,7 +32,9 @@ struct ContentView: View {
                         LabeledContent("Total Analyses", value: "\(stats.totalAnalyses)")
                         LabeledContent("Cache Hits", value: "\(stats.cacheHits)")
                         LabeledContent("Cache Misses", value: "\(stats.cacheMisses)")
-                        LabeledContent("Hit Rate", value: String(format: "%.1f%%", stats.cacheHitRate * 100))
+                        LabeledContent("Hit Rate") {
+                            Text(String(format: "%.1f%%", stats.cacheHitRate * 100))
+                        }
                     } else {
                         Text("Connect to server to view stats")
                             .foregroundColor(.secondary)
