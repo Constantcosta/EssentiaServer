@@ -190,6 +190,40 @@ class MacStudioServerManager: ObservableObject {
         }
     }
     
+    // MARK: - Audio Analysis
+    
+    func analyzeAudio(url: String, title: String, artist: String) async throws -> AnalysisResult {
+        guard let requestURL = URL(string: "\(baseURL)/analyze") else {
+            throw URLError(.badURL)
+        }
+        
+        var request = URLRequest(url: requestURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        
+        let body: [String: String] = [
+            "url": url,
+            "title": title,
+            "artist": artist
+        ]
+        
+        request.httpBody = try JSONEncoder().encode(body)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw URLError(.init(rawValue: httpResponse.statusCode))
+        }
+        
+        let result = try JSONDecoder().decode(AnalysisResult.self, from: data)
+        return result
+    }
+    
     // MARK: - Database Info
     
     func getDatabaseInfo() async -> (size: String, location: String, itemCount: Int) {
@@ -200,5 +234,47 @@ class MacStudioServerManager: ObservableObject {
         let itemCount = serverStats?.totalCachedSongs ?? cachedAnalyses.count
         
         return (size: size, location: location, itemCount: itemCount)
+    }
+}
+
+// MARK: - Analysis Result Model
+
+struct AnalysisResult: Codable {
+    let bpm: Double
+    let bpmConfidence: Double
+    let key: String
+    let keyConfidence: Double
+    let energy: Double
+    let danceability: Double
+    let acousticness: Double
+    let spectralCentroid: Double
+    let analysisDuration: Double
+    let cached: Bool
+    
+    // Phase 1 features (optional for backward compatibility)
+    let timeSignature: String?
+    let valence: Double?
+    let mood: String?
+    let loudness: Double?
+    let dynamicRange: Double?
+    let silenceRatio: Double?
+    
+    enum CodingKeys: String, CodingKey {
+        case bpm
+        case bpmConfidence = "bpm_confidence"
+        case key
+        case keyConfidence = "key_confidence"
+        case energy
+        case danceability
+        case acousticness
+        case spectralCentroid = "spectral_centroid"
+        case analysisDuration = "analysis_duration"
+        case cached
+        case timeSignature = "time_signature"
+        case valence
+        case mood
+        case loudness
+        case dynamicRange = "dynamic_range"
+        case silenceRatio = "silence_ratio"
     }
 }

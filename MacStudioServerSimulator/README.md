@@ -36,7 +36,21 @@ open MacStudioServerSimulator.xcworkspace
 
 Or double-click `MacStudioServerSimulator.xcworkspace` in Finder.
 
-### 2. Start the Python Server
+### 2. Configure Code Signing (First Time Only)
+
+When you first open the project, Xcode may show a signing error. To fix:
+
+1. In Xcode, select the project in the navigator (blue icon)
+2. Select the "MacStudioServerSimulator" target
+3. Go to the "Signing & Capabilities" tab
+4. Under "Team", select your Apple ID or development team
+   - If you don't have one, click "Add an Account..." to sign in
+   - For simulator testing only, you can use your personal Apple ID
+5. Xcode will automatically manage signing for you
+
+**Note**: Code signing is required even for simulator builds. You don't need a paid developer account for simulator testing.
+
+### 3. Start the Python Server
 
 Before running the simulator, start the backend server:
 
@@ -51,13 +65,13 @@ You should see:
 📡 Listening on http://127.0.0.1:5050
 ```
 
-### 3. Run in Simulator
+### 4. Run in Simulator
 
 1. In Xcode, select a simulator (iPhone 15 Pro recommended)
 2. Click the Play button or press `Cmd+R`
 3. The app will launch in the simulator
 
-### 4. Test the Connection
+### 5. Test the Connection
 
 1. In the app, tap "Check Status"
 2. If the server is running, you'll see a green "Connected" indicator
@@ -145,6 +159,22 @@ MacStudioServerSimulator/
 6. **View server stats** - See cache performance
 
 ## Troubleshooting
+
+### "Signing for MacStudioServerSimulator requires a development team"
+
+This error appears when opening the project for the first time. To fix:
+
+1. Open the project in Xcode
+2. Select the project in the navigator (blue "MacStudioServerSimulator" icon at the top)
+3. Select the "MacStudioServerSimulator" target
+4. Click the "Signing & Capabilities" tab
+5. Under "Team", select your Apple ID from the dropdown
+   - If you don't see your Apple ID, click "Add an Account..." and sign in
+   - A free Apple ID works fine for simulator testing
+6. Check "Automatically manage signing"
+7. Build and run (`Cmd+R`)
+
+**Note**: You don't need a paid developer account to run in the simulator.
 
 ### "Cannot connect to server"
 
