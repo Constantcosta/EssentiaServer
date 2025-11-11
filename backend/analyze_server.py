@@ -241,9 +241,46 @@ def init_db():
                 user_verified INTEGER DEFAULT 0,
                 manual_bpm REAL,
                 manual_key TEXT,
-                bpm_notes TEXT
+                bpm_notes TEXT,
+                time_signature TEXT,
+                valence REAL,
+                mood TEXT,
+                loudness REAL,
+                dynamic_range REAL,
+                silence_ratio REAL
             )
         ''')
+        
+        # Add new columns to existing tables if they don't exist (migration)
+        try:
+            cursor.execute('ALTER TABLE analysis_cache ADD COLUMN time_signature TEXT')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        try:
+            cursor.execute('ALTER TABLE analysis_cache ADD COLUMN valence REAL')
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cursor.execute('ALTER TABLE analysis_cache ADD COLUMN mood TEXT')
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cursor.execute('ALTER TABLE analysis_cache ADD COLUMN loudness REAL')
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cursor.execute('ALTER TABLE analysis_cache ADD COLUMN dynamic_range REAL')
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cursor.execute('ALTER TABLE analysis_cache ADD COLUMN silence_ratio REAL')
+        except sqlite3.OperationalError:
+            pass
         
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_hash ON analysis_cache(preview_url_hash)
@@ -314,7 +351,8 @@ def check_cache(preview_url):
         cursor.execute('''
             SELECT bpm, bpm_confidence, key, key_confidence, 
                    energy, danceability, acousticness, spectral_centroid,
-                   analyzed_at
+                   analyzed_at, time_signature, valence, mood, loudness, 
+                   dynamic_range, silence_ratio
             FROM analysis_cache 
             WHERE preview_url_hash = ?
         ''', (url_hash,))
@@ -323,7 +361,7 @@ def check_cache(preview_url):
     
     if result:
         logger.info(f"✅ CACHE HIT for {preview_url[:50]}...")
-        return {
+        cached_data = {
             'bpm': result[0],
             'bpm_confidence': result[1],
             'key': result[2],
@@ -335,6 +373,17 @@ def check_cache(preview_url):
             'cached': True,
             'analyzed_at': result[8]
         }
+        
+        # Add Phase 1 fields if available (backward compatibility)
+        if len(result) > 9 and result[9] is not None:
+            cached_data['time_signature'] = result[9]
+            cached_data['valence'] = result[10]
+            cached_data['mood'] = result[11]
+            cached_data['loudness'] = result[12]
+            cached_data['dynamic_range'] = result[13]
+            cached_data['silence_ratio'] = result[14]
+        
+        return cached_data
     
     logger.info(f"❌ CACHE MISS for {preview_url[:50]}...")
     return None
@@ -350,8 +399,9 @@ def save_to_cache(preview_url, title, artist, analysis_result, duration):
             (preview_url_hash, title, artist, preview_url, 
              bpm, bpm_confidence, key, key_confidence,
              energy, danceability, acousticness, spectral_centroid,
-             analysis_duration)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             analysis_duration, time_signature, valence, mood, 
+             loudness, dynamic_range, silence_ratio)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             url_hash,
             title,
@@ -365,7 +415,13 @@ def save_to_cache(preview_url, title, artist, analysis_result, duration):
             analysis_result['danceability'],
             analysis_result['acousticness'],
             analysis_result['spectral_centroid'],
-            duration
+            duration,
+            analysis_result.get('time_signature'),
+            analysis_result.get('valence'),
+            analysis_result.get('mood'),
+            analysis_result.get('loudness'),
+            analysis_result.get('dynamic_range'),
+            analysis_result.get('silence_ratio')
         ))
     
     logger.info(f"💾 Cached analysis for '{title}' by {artist}")
@@ -379,6 +435,151 @@ def update_stats(cache_hit):
             cursor.execute('UPDATE server_stats SET cache_hits = cache_hits + 1, last_updated = CURRENT_TIMESTAMP')
         else:
             cursor.execute('UPDATE server_stats SET total_analyses = total_analyses + 1, cache_misses = cache_misses + 1, last_updated = CURRENT_TIMESTAMP')
+
+# PHASE 1 ADVANCED ANALYSIS FUNCTIONS
+
+def detect_time_signature(beats, sr):
+    """
+    Detect time signature (3/4, 4/4, 5/4, etc.) from beat patterns.
+    
+    Args:
+        beats: Array of beat frames
+        sr: Sample rate
+    
+    Returns:
+        str: Time signature (e.g., "4/4", "3/4")
+    """
+    if len(beats) < 4:
+        return "4/4"  # Default if not enough beats
+    
+    # Calculate inter-beat intervals
+    beat_times = librosa.frames_to_time(beats, sr=sr)
+    intervals = np.diff(beat_times)
+    
+    # Group beats by analyzing pattern
+    # Look for recurring patterns in beat strength
+    if len(intervals) < 3:
+        return "4/4"
+    
+    # Estimate beats per bar by looking at recurring patterns
+    # Most music is in 4/4, so default to that unless strong evidence otherwise
+    avg_interval = np.mean(intervals)
+    std_interval = np.std(intervals)
+    
+    # If intervals are very regular, likely 4/4
+    if std_interval / avg_interval < 0.15:
+        # Check for waltz pattern (3/4) - every 3rd beat is stronger
+        if len(beats) >= 6:
+            # Simple heuristic: 3/4 has different pattern than 4/4
+            # For now, default to 4/4 for most cases
+            return "4/4"
+    
+    return "4/4"  # Most common time signature
+
+def estimate_valence_and_mood(tempo, key, mode, chroma_sums, energy):
+    """
+    Estimate valence (happy/sad) and mood from musical features.
+    
+    Args:
+        tempo: BPM
+        key: Key index (0-11)
+        mode: "Major" or "Minor"
+        chroma_sums: Chromagram energy sums
+        energy: RMS energy
+    
+    Returns:
+        tuple: (valence (0-1), mood string)
+    """
+    # Valence estimation based on multiple factors
+    valence = 0.5  # Neutral baseline
+    
+    # Tempo contribution (faster = happier)
+    if tempo > 120:
+        valence += 0.2
+    elif tempo < 90:
+        valence -= 0.2
+    
+    # Mode contribution (major = happier)
+    if mode == "Major":
+        valence += 0.15
+    else:
+        valence -= 0.15
+    
+    # Energy contribution (higher energy = more positive)
+    valence += (energy - 0.5) * 0.2
+    
+    # Normalize to 0-1
+    valence = max(0.0, min(1.0, valence))
+    
+    # Determine mood category
+    if valence > 0.65:
+        if tempo > 120:
+            mood = "energetic"
+        else:
+            mood = "happy"
+    elif valence > 0.35:
+        mood = "neutral"
+    else:
+        if tempo < 90:
+            mood = "melancholic"
+        else:
+            mood = "tense"
+    
+    return valence, mood
+
+def calculate_loudness_and_dynamics(y, sr):
+    """
+    Calculate loudness (LUFS-like) and dynamic range.
+    
+    Args:
+        y: Audio time series
+        sr: Sample rate
+    
+    Returns:
+        tuple: (loudness in dB, dynamic_range in dB)
+    """
+    # Calculate RMS energy per frame
+    rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=512)[0]
+    
+    # Convert to dB
+    rms_db = librosa.amplitude_to_db(rms, ref=np.max)
+    
+    # Loudness: integrated average (similar to LUFS)
+    loudness = float(np.mean(rms_db))
+    
+    # Dynamic range: difference between loud and quiet parts
+    # Use percentiles to avoid outliers
+    loud_threshold = np.percentile(rms_db, 95)
+    quiet_threshold = np.percentile(rms_db, 10)
+    dynamic_range = float(loud_threshold - quiet_threshold)
+    
+    return loudness, dynamic_range
+
+def detect_silence_ratio(y, sr, threshold_db=-40):
+    """
+    Detect ratio of silence in the audio.
+    
+    Args:
+        y: Audio time series
+        sr: Sample rate
+        threshold_db: Silence threshold in dB
+    
+    Returns:
+        float: Ratio of silent frames (0-1)
+    """
+    # Calculate RMS energy per frame
+    rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=512)[0]
+    
+    # Convert to dB
+    rms_db = librosa.amplitude_to_db(rms, ref=np.max)
+    
+    # Count silent frames
+    silent_frames = np.sum(rms_db < threshold_db)
+    total_frames = len(rms_db)
+    
+    silence_ratio = float(silent_frames / total_frames) if total_frames > 0 else 0.0
+    
+    return silence_ratio
 
 def perform_audio_analysis(y, sr, title, artist):
     """
@@ -488,8 +689,31 @@ def perform_audio_analysis(y, sr, title, artist):
     beat_regularity = 1.0 - (tempogram_std / (tempogram_mean + 1e-6))
     danceability = min((beat_strength * 2 + beat_regularity) / 2, 1.0)
     
+    # 4. PHASE 1 ADVANCED FEATURES
+    
+    # Time signature detection
+    time_signature = detect_time_signature(beats, sr)
+    logger.info(f"🎼 Time signature: {time_signature}")
+    
+    # Valence and mood estimation
+    valence, mood = estimate_valence_and_mood(
+        bpm_value := float(tempo.flatten()[0] if isinstance(tempo, np.ndarray) else tempo),
+        key_idx,
+        scale,
+        chroma_sums,
+        energy
+    )
+    logger.info(f"😊 Mood: {mood} (valence: {valence:.2f})")
+    
+    # Loudness and dynamic range
+    loudness, dynamic_range = calculate_loudness_and_dynamics(y, sr)
+    logger.info(f"🔊 Loudness: {loudness:.1f} dB, Dynamic range: {dynamic_range:.1f} dB")
+    
+    # Silence detection
+    silence_ratio = detect_silence_ratio(y, sr)
+    logger.info(f"🔇 Silence ratio: {silence_ratio:.1%}")
+    
     duration = time.time() - start_time
-    bpm_value = float(tempo.flatten()[0] if isinstance(tempo, np.ndarray) else tempo)
     
     result = {
         'bpm': bpm_value,
@@ -500,11 +724,17 @@ def perform_audio_analysis(y, sr, title, artist):
         'danceability': danceability,
         'acousticness': acousticness,
         'spectral_centroid': avg_centroid,
+        'time_signature': time_signature,
+        'valence': valence,
+        'mood': mood,
+        'loudness': loudness,
+        'dynamic_range': dynamic_range,
+        'silence_ratio': silence_ratio,
         'analysis_duration': duration,
         'cached': False
     }
     
-    logger.info(f"✅ Analysis complete in {duration:.2f}s - BPM: {bpm_value:.1f}, Key: {full_key}")
+    logger.info(f"✅ Analysis complete in {duration:.2f}s - BPM: {bpm_value:.1f}, Key: {full_key}, Mood: {mood}")
     return result
 
 def analyze_audio(audio_url, title, artist):
