@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+venv/
+.venv/
+.env
+.env.*
+*.log
+*.sqlite3
+
+# macOS / Xcode
+.DS_Store
+xcuserdata/
+DerivedData/
+*.xcuserstate
+*.xcuserdata
+build/
+.swiftpm/
+.build/
+
+# Swift / App bundles
+Songwise Server.app/Contents/Resources/*.log
