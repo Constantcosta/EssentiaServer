@@ -71,7 +71,13 @@ extension ServerStats {
         cacheHits = try container.decode(Int.self, forKey: .cacheHits)
         cacheMisses = try container.decode(Int.self, forKey: .cacheMisses)
         lastUpdated = try container.decodeIfPresent(String.self, forKey: .lastUpdated)
-        cacheHitRate = try container.decode(String.self, forKey: .cacheHitRate)
+        if let rawString = try? container.decode(String.self, forKey: .cacheHitRate) {
+            cacheHitRate = rawString
+        } else if let rawNumber = try? container.decode(Double.self, forKey: .cacheHitRate) {
+            cacheHitRate = String(rawNumber)
+        } else {
+            cacheHitRate = "0"
+        }
         totalCachedSongs = try container.decodeIfPresent(Int.self, forKey: .totalCachedSongs)
         databasePath = try container.decodeIfPresent(String.self, forKey: .databasePath)
     }
@@ -86,6 +92,36 @@ extension ServerStats {
         try container.encodeIfPresent(totalCachedSongs, forKey: .totalCachedSongs)
         try container.encodeIfPresent(databasePath, forKey: .databasePath)
     }
+}
+
+extension ServerStats {
+    /// Decimal representation (0-1) of the cache hit rate when possible.
+    var cacheHitRatePercentage: Double? {
+        normalizedHitRateValue(cacheHitRate)
+    }
+    
+    /// Human-readable percentage string, falling back to the raw value if parsing fails.
+    var cacheHitRateFormatted: String {
+        guard let percentage = cacheHitRatePercentage else {
+            return cacheHitRate
+        }
+        return String(format: "%.1f%%", percentage * 100)
+    }
+}
+
+private func normalizedHitRateValue(_ rawValue: String) -> Double? {
+    let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    
+    let cleaned = trimmed.replacingOccurrences(of: "%", with: "")
+    guard let numeric = Double(cleaned) else { return nil }
+    
+    // Values greater than 1 or strings that already had '%' are treated as whole percentages.
+    if trimmed.contains("%") || numeric > 1 {
+        return numeric / 100
+    }
+    
+    return numeric
 }
 
 struct CachedAnalysis: Identifiable, Sendable, Codable {
@@ -103,6 +139,12 @@ struct CachedAnalysis: Identifiable, Sendable, Codable {
     let spectralCentroid: Double?
     let analyzedAt: String
     let analysisDuration: Double?
+    let timeSignature: String?
+    let valence: Double?
+    let mood: String?
+    let loudness: Double?
+    let dynamicRange: Double?
+    let silenceRatio: Double?
     let userVerified: Bool
     let manualBpm: Double?
     let manualKey: String?
@@ -125,6 +167,12 @@ extension CachedAnalysis {
         case spectralCentroid = "spectral_centroid"
         case analyzedAt = "analyzed_at"
         case analysisDuration = "analysis_duration"
+        case timeSignature = "time_signature"
+        case valence
+        case mood
+        case loudness
+        case dynamicRange = "dynamic_range"
+        case silenceRatio = "silence_ratio"
         case userVerified = "user_verified"
         case manualBpm = "manual_bpm"
         case manualKey = "manual_key"
@@ -147,6 +195,12 @@ extension CachedAnalysis {
         spectralCentroid = try container.decodeIfPresent(Double.self, forKey: .spectralCentroid)
         analyzedAt = try container.decode(String.self, forKey: .analyzedAt)
         analysisDuration = try container.decodeIfPresent(Double.self, forKey: .analysisDuration)
+        timeSignature = try container.decodeIfPresent(String.self, forKey: .timeSignature)
+        valence = try container.decodeIfPresent(Double.self, forKey: .valence)
+        mood = try container.decodeIfPresent(String.self, forKey: .mood)
+        loudness = try container.decodeIfPresent(Double.self, forKey: .loudness)
+        dynamicRange = try container.decodeIfPresent(Double.self, forKey: .dynamicRange)
+        silenceRatio = try container.decodeIfPresent(Double.self, forKey: .silenceRatio)
         userVerified = try container.decode(Bool.self, forKey: .userVerified)
         manualBpm = try container.decodeIfPresent(Double.self, forKey: .manualBpm)
         manualKey = try container.decodeIfPresent(String.self, forKey: .manualKey)
@@ -169,6 +223,12 @@ extension CachedAnalysis {
         try container.encodeIfPresent(spectralCentroid, forKey: .spectralCentroid)
         try container.encode(analyzedAt, forKey: .analyzedAt)
         try container.encodeIfPresent(analysisDuration, forKey: .analysisDuration)
+        try container.encodeIfPresent(timeSignature, forKey: .timeSignature)
+        try container.encodeIfPresent(valence, forKey: .valence)
+        try container.encodeIfPresent(mood, forKey: .mood)
+        try container.encodeIfPresent(loudness, forKey: .loudness)
+        try container.encodeIfPresent(dynamicRange, forKey: .dynamicRange)
+        try container.encodeIfPresent(silenceRatio, forKey: .silenceRatio)
         try container.encode(userVerified, forKey: .userVerified)
         try container.encodeIfPresent(manualBpm, forKey: .manualBpm)
         try container.encodeIfPresent(manualKey, forKey: .manualKey)
@@ -378,5 +438,29 @@ struct AnyCodable: Sendable, Codable {
             return dictionary.mapValues { $0.value }
         case .other(let description): return description
         }
+    }
+}
+
+// MARK: - Calibration Toolkit Models
+
+struct CalibrationSong: Identifiable, Codable, Equatable {
+    let id: UUID
+    var title: String
+    var artist: String
+    var filename: String
+    var originalFilename: String
+    var addedAt: Date
+    
+    var displayName: String {
+        "\(title) — \(artist)"
+    }
+    
+    var normalizedMatchKey: String {
+        func normalize(_ value: String) -> String {
+            value
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+        }
+        return "\(normalize(title))::\(normalize(artist))"
     }
 }

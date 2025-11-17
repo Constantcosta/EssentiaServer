@@ -8,22 +8,40 @@ echo "🎵 Mac Studio Audio Analysis Server Setup"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
 
-# Check if Python 3 is installed
-if ! command -v python3 &> /dev/null; then
+# Determine which Python to use (prefer virtual environment)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+VENV_PYTHON="$REPO_ROOT/.venv/bin/python"
+
+if [ -f "$VENV_PYTHON" ]; then
+    PYTHON_CMD="$VENV_PYTHON"
+    PIP_CMD="$REPO_ROOT/.venv/bin/pip"
+    echo "✅ Using virtual environment Python: $PYTHON_CMD"
+    echo "   Version: $($PYTHON_CMD --version)"
+elif command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+    PIP_CMD="pip3"
+    echo "⚠️  Virtual environment not found at $VENV_PYTHON"
+    echo "   Using system Python: $(which python3)"
+    echo "   Version: $(python3 --version)"
+    echo ""
+    echo "💡 To use a virtual environment (recommended):"
+    echo "   cd $REPO_ROOT && python3 -m venv .venv"
+    echo "   $REPO_ROOT/.venv/bin/pip install -r backend/requirements.txt"
+else
     echo "❌ Python 3 is not installed. Please install Python 3 first."
     exit 1
 fi
 
-echo "✅ Python 3 found: $(python3 --version)"
 echo ""
 
-# Check if pip3 is installed
-if ! command -v pip3 &> /dev/null; then
-    echo "❌ pip3 is not installed. Please install pip3 first."
+# Check if pip is available
+if ! command -v "$PIP_CMD" &> /dev/null; then
+    echo "❌ pip is not installed. Please install pip first."
     exit 1
 fi
 
-echo "✅ pip3 found"
+echo "✅ pip found"
 echo ""
 
 # Install required packages
@@ -31,7 +49,7 @@ echo "📦 Installing required Python packages..."
 echo "   This may take a few minutes on first run..."
 echo ""
 
-pip3 install --quiet flask flask-cors librosa requests numpy
+"$PIP_CMD" install --quiet -r "$SCRIPT_DIR/requirements.txt"
 
 if [ $? -eq 0 ]; then
     echo "✅ All packages installed successfully"
@@ -70,4 +88,4 @@ echo "════════════════════════�
 echo ""
 
 # Run the server
-python3 analyze_server.py
+"$PYTHON_CMD" analyze_server.py

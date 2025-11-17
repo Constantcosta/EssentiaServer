@@ -1,0 +1,203 @@
+{
+  "generated_at": "2025-11-12T15:11:05.147240",
+  "feature_set_version": "v1",
+  "notes": "combo-225553-005306",
+  "datasets": [
+    "data/calibration/calibration_20251113_combo.parquet"
+  ],
+  "dataset_lineage": {
+    "artifacts": [
+      {
+        "path": "data/calibration/calibration_20251113_combo.parquet",
+        "exists": true,
+        "size_bytes": 53480,
+        "modified_at": "2025-11-12T15:10:03.330128+00:00",
+        "sha256": "023282526ce2d22a0056f8330d5a52dfebfeb15802828a42e37abef2e76408b1",
+        "rows": 54,
+        "columns": [
+          "#",
+          "analysis_duration_seconds",
+          "analyzed_at",
+          "analyzer_acousticness",
+          "analyzer_bpm",
+          "analyzer_bpm_confidence",
+          "analyzer_brightness_hz",
+          "analyzer_build_sha",
+          "analyzer_danceability",
+          "analyzer_dynamic_range_db",
+          "analyzer_energy",
+          "analyzer_key",
+          "analyzer_key_confidence",
+          "analyzer_loudness_db",
+          "analyzer_mood",
+          "analyzer_silence_ratio",
+          "analyzer_source_file",
+          "analyzer_time_signature",
+          "analyzer_valence",
+          "artist",
+          "dataset_created_at",
+          "feature_set_version",
+          "match_key",
+          "notes",
+          "preview_url",
+          "spotify_acoustic",
+          "spotify_added_at",
+          "spotify_album",
+          "spotify_album_date",
+          "spotify_album_label",
+          "spotify_artist",
+          "spotify_bpm",
+          "spotify_camelot",
+          "spotify_dance",
+          "spotify_duration",
+          "spotify_duration_seconds",
+          "spotify_energy",
+          "spotify_genres",
+          "spotify_happy",
+          "spotify_instrumental",
+          "spotify_isrc",
+          "spotify_key",
+          "spotify_live",
+          "spotify_loudness_db",
+          "spotify_parent_genres",
+          "spotify_popularity",
+          "spotify_snapshot_date",
+          "spotify_song",
+          "spotify_source_file",
+          "spotify_speech",
+          "spotify_time_signature",
+          "spotify_track_id",
+          "title"
+        ]
+      }
+    ],
+    "analyzer_sources": [
+      {
+        "path": "/Users/costasconstantinou/Library/Application Support/MacStudioServerSimulator/CalibrationExports/calibration_run_20251113_005306.csv",
+        "exists": true,
+        "size_bytes": 11328,
+        "modified_at": "2025-11-12T14:53:06.712718+00:00",
+        "sha256": "8c66042012de853f5a55f159ff4a9856c77e223321e05af04bd1f86f4d508e33",
+        "rows": 54
+      }
+    ],
+    "spotify_sources": [
+      {
+        "path": "csv/spotify 2.csv",
+        "exists": true,
+        "size_bytes": 7502,
+        "modified_at": "2025-11-12T06:55:26.586575+00:00",
+        "sha256": "e1dff744ebbea266150e747dc3182729305887dafd510ed82f5cca283106b29b",
+        "rows": 34
+      },
+      {
+        "path": "csv/spotify metrics.csv",
+        "exists": true,
+        "size_bytes": 4915,
+        "modified_at": "2025-11-11T18:10:49.706938+00:00",
+        "sha256": "6d0e9d1fc561c3a634890954513f46a3ee0e500d2e1bf5fc9ac88bcda0fb0803",
+        "rows": 20
+      }
+    ]
+  },
+  "feature_count": 6,
+  "skipped_features": [],
+  "features": {
+    "bpm": {
+      "slope": 0.7365020758582836,
+      "intercept": 31.276304966632928,
+      "sample_count": 54,
+      "r2": 0.31114649387244064,
+      "mae_before": 10.782351851851853,
+      "mae_after": 12.233202330072091,
+      "percent_scale": false,
+      "clamp": {
+        "min": null,
+        "max": null
+      },
+      "source_column": "analyzer_bpm",
+      "target_column": "spotify_bpm",
+      "description": "Tempo (beats per minute)"
+    },
+    "danceability": {
+      "slope": 1.3417299366997775,
+      "intercept": -0.3382947640419068,
+      "sample_count": 54,
+      "r2": 0.14834128284051862,
+      "mae_before": 0.1436296296296296,
+      "mae_after": 0.11869060085540789,
+      "percent_scale": true,
+      "clamp": {
+        "min": 0.0,
+        "max": 1.0
+      },
+      "source_column": "analyzer_danceability",
+      "target_column": "spotify_dance",
+      "description": "Danceability classifier (0-1)"
+    },
+    "energy": {
+      "slope": 1.304713048407959,
+      "intercept": -0.03634593080651411,
+      "sample_count": 54,
+      "r2": 0.1979392921477624,
+      "mae_before": 0.22450000000000003,
+      "mae_after": 0.19308496048664703,
+      "percent_scale": true,
+      "clamp": {
+        "min": 0.0,
+        "max": 1.0
+      },
+      "source_column": "analyzer_energy",
+      "target_column": "spotify_energy",
+      "description": "Energy estimate (0-1)"
+    },
+    "acousticness": {
+      "slope": 1.2747152668750479,
+      "intercept": -0.3185062538079382,
+      "sample_count": 54,
+      "r2": 0.38917533176722396,
+      "mae_before": 0.2875185185185185,
+      "mae_after": 0.19914232109830912,
+      "percent_scale": true,
+      "clamp": {
+        "min": 0.0,
+        "max": 1.0
+      },
+      "source_column": "analyzer_acousticness",
+      "target_column": "spotify_acoustic",
+      "description": "Acousticness likelihood (0-1)"
+    },
+    "valence": {
+      "slope": 0.1633296203794282,
+      "intercept": 0.4851256949616389,
+      "sample_count": 54,
+      "r2": 0.018209584885079844,
+      "mae_before": 0.23724074074074078,
+      "mae_after": 0.20342485170035632,
+      "percent_scale": true,
+      "clamp": {
+        "min": 0.0,
+        "max": 1.0
+      },
+      "source_column": "analyzer_valence",
+      "target_column": "spotify_happy",
+      "description": "Valence / positivity"
+    },
+    "loudness": {
+      "slope": 0.13207228378976166,
+      "intercept": -6.822907681469849,
+      "sample_count": 54,
+      "r2": 0.00831250475651879,
+      "mae_before": 5.387037037037037,
+      "mae_after": 3.6555473309392084,
+      "percent_scale": false,
+      "clamp": {
+        "min": -40.0,
+        "max": 0.0
+      },
+      "source_column": "analyzer_loudness_db",
+      "target_column": "spotify_loudness_db",
+      "description": "Integrated loudness in dBFS (negative values)."
+    }
+  }
+}

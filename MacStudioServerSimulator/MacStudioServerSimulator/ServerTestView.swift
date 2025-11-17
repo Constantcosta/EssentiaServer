@@ -12,7 +12,7 @@ struct ServerTestView: View {
     @State private var testURL = "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview125/v4/test.m4a"
     @State private var songTitle = "Test Song"
     @State private var artist = "Test Artist"
-    @State private var analysisResult: AnalysisResult?
+    @State private var analysisResult: MacStudioServerManager.AnalysisResult?
     @State private var isAnalyzing = false
     @State private var errorMessage: String?
     
@@ -21,7 +21,6 @@ struct ServerTestView: View {
             Section("Audio Input") {
                 TextField("Preview URL", text: $testURL)
                     .textFieldStyle(.roundedBorder)
-                    .autocapitalization(.none)
                 
                 TextField("Song Title", text: $songTitle)
                     .textFieldStyle(.roundedBorder)

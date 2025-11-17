@@ -5,52 +5,135 @@ Analyzes Apple Music previews and caches results
 Acts as intelligent fallback for GetSongBPM
 """
 
+# Load .env file FIRST before any other imports
+from pathlib import Path
+import os
+import sys
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+# Add repo root to path so we can import backend modules
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+env_file = REPO_ROOT / ".env"
+if env_file.exists():
+    print(f"🔧 Loading configuration from {env_file}")
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                os.environ[key.strip()] = value.strip()
+    print(f"✅ Loaded .env with ANALYSIS_WORKERS={os.environ.get('ANALYSIS_WORKERS', 'not set')}, ANALYSIS_SAMPLE_RATE={os.environ.get('ANALYSIS_SAMPLE_RATE', 'not set')}")
+else:
+    print(f"⚠️ No .env file found at {env_file}, using defaults")
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import librosa
-import numpy as np
-import requests
-from io import BytesIO
-import sqlite3
-import hashlib
 import logging
 from datetime import datetime
-import os
 import secrets
-from functools import wraps, lru_cache
-from collections import defaultdict
+from functools import wraps
 import time
-from contextlib import contextmanager
 from threading import Lock
+import subprocess
+from typing import Optional
+import sys
+import traceback
+
+from backend.server.app_config import ServerConfig
+
+# REPO_ROOT already defined above when loading .env
+CONFIG = ServerConfig.from_env(REPO_ROOT)
+EXPECTED_VENV_PYTHON = CONFIG.expected_venv_python
+ALLOW_SYSTEM_PYTHON = CONFIG.allow_system_python
+PRODUCTION_MODE = CONFIG.production_mode
+DEFAULT_PORT = CONFIG.default_port
+ENV_HOST = CONFIG.host
+RATE_LIMIT = CONFIG.rate_limit
+
+def _ensure_virtualenv_python(expected_path: Path, allow_system_python: bool) -> None:
+    if allow_system_python:
+        print("⚠️ ALLOW_SYSTEM_PYTHON=1 set — skipping virtual environment enforcement.")
+        return
+    if not expected_path.exists():
+        message = (
+            f"❌ Required virtual environment not found at {expected_path}.\n"
+            "Create it with: python3.12 -m venv .venv && "
+            ".venv/bin/pip install -r backend/requirements.txt\n"
+            "To bypass temporarily (not recommended), set ALLOW_SYSTEM_PYTHON=1."
+        )
+        print(message, file=sys.stderr)
+        raise SystemExit(2)
+    current = Path(sys.executable).resolve()
+    expected_real = expected_path.resolve()
+    if current != expected_real:
+        message = (
+            f"❌ Analyzer must run via {expected_real}, but current interpreter is {current}.\n"
+            "Please restart using the repo virtual environment "
+            "(.venv/bin/python backend/analyze_server.py). "
+            "Set ALLOW_SYSTEM_PYTHON=1 to skip this check (not recommended)."
+        )
+        print(message, file=sys.stderr)
+        raise SystemExit(3)
+
+_ensure_virtualenv_python(EXPECTED_VENV_PYTHON, ALLOW_SYSTEM_PYTHON)
+# Ensure we know which interpreter launched this server (helps GUI verification).
+print(f"🧠 Analyzer running via {sys.executable}")
+
+from backend.analysis.utils import clamp_to_unit, safe_float, percentage
+from backend.analysis.pipeline import CalibrationHooks
+from backend.analysis.pipeline_core import perform_audio_analysis
+from backend.analysis.pipeline_chunks import attach_chunk_analysis
+from backend.analysis.reporting import (
+    ANALYSIS_TIMER_EXPORT_FIELDS,
+    CHUNK_TIMING_EXPORT_FIELDS,
+    EXPORT_DIR,
+)
+from backend.analysis.calibration import (
+    KEY_CALIBRATION_PATH,
+    apply_calibration_layer,
+    apply_calibration_models,
+    apply_key_calibration,
+    apply_bpm_calibration,
+    load_calibration_config,
+    load_calibration_models,
+    load_key_calibration,
+    load_bpm_calibration,
+    refresh_calibration_assets,
+)
+from backend.analysis.essentia_support import HAS_ESSENTIA, es
+from backend.server import configure_processing, process_audio_bytes
+from backend.server.admin_routes import error_hint_from_exception, register_admin_routes
+from backend.server.analysis_routes import register_analysis_routes
+from backend.server.cache_routes import (
+    cache_search,
+    clear_cache,
+    configure_cache_routes,
+    delete_cache_entry,
+    export_cache,
+    list_cache,
+)
+from backend.server.cache_store import check_cache, get_url_hash, save_to_cache, update_stats
+from backend.server.calibration_routes import register_calibration_routes
+from backend.server.database import configure_database, get_db_connection, initialize_database
+from backend.server.scipy_compat import ensure_hann_patch
+from backend.analysis.key_detection import configure_key_detection
+
+SCIPY_HANN_PATCHED = ensure_hann_patch()
+if not SCIPY_HANN_PATCHED:
+    print("⚠️ Could not apply scipy.signal.hann compatibility shim – check SciPy installation.")
+else:
+    print("✅ Enabled scipy.signal.hann compatibility shim.")
+
+configure_key_detection(HAS_ESSENTIA, es)
 
 app = Flask(__name__)
-
-# Database connection pool with thread safety
-_db_lock = Lock()
-_db_cache = {}
-
-@contextmanager
-def get_db_connection():
-    """Context manager for database connections with basic pooling"""
-    thread_id = id(time.time())  # Simple thread identifier
-    
-    with _db_lock:
-        if thread_id not in _db_cache:
-            _db_cache[thread_id] = sqlite3.connect(DB_PATH, check_same_thread=False)
-    
-    conn = _db_cache.get(thread_id) or sqlite3.connect(DB_PATH)
-    try:
-        yield conn
-    finally:
-        # Don't close pooled connections, just ensure changes are committed
-        if conn:
-            conn.commit()
+app.config["SERVER_CONFIG"] = CONFIG
 
 # SECURITY CONFIGURATION
 # For development: localhost only
 # For production: set PRODUCTION_MODE=True and generate secure API keys
-PRODUCTION_MODE = os.environ.get('PRODUCTION_MODE', 'false').lower() == 'true'
-
 if PRODUCTION_MODE:
     # Production: Allow all origins but require API key authentication
     CORS(app)
@@ -61,7 +144,6 @@ else:
     print("🔧 DEVELOPMENT MODE: localhost only, no authentication")
 
 # Rate limiting (requests per minute per API key)
-RATE_LIMIT = 60  # requests per minute
 rate_limit_data = {}
 rate_limit_lock = Lock()
 
@@ -71,51 +153,126 @@ api_key_cache_lock = Lock()
 API_KEY_CACHE_TTL = 300  # 5 minutes
 
 # Configuration
-DEFAULT_PORT = int(os.environ.get('MAC_STUDIO_SERVER_PORT', '5050'))
-ENV_HOST = os.environ.get('MAC_STUDIO_SERVER_HOST')
-DB_PATH = os.path.expanduser('~/Music/audio_analysis_cache.db')
-CACHE_DIR = os.path.expanduser('~/Music/AudioAnalysisCache')
-os.makedirs(CACHE_DIR, exist_ok=True)
+if str(REPO_ROOT) not in sys.path:
+    sys.path.append(str(REPO_ROOT))
+from tools.key_utils import (
+    canonical_key_id,
+    normalize_key_label,
+    parse_canonical_key_id,
+    format_canonical_key,
+)  # type: ignore  # noqa: E402
 
-# Setup logging
+# Database connection pool with thread safety
+from backend.analysis import settings as analysis_settings  # noqa: E402
+
+ANALYSIS_SAMPLE_RATE = analysis_settings.ANALYSIS_SAMPLE_RATE
+ANALYSIS_FFT_SIZE = analysis_settings.ANALYSIS_FFT_SIZE
+ANALYSIS_HOP_LENGTH = analysis_settings.ANALYSIS_HOP_LENGTH
+ANALYSIS_RESAMPLE_TYPE = analysis_settings.ANALYSIS_RESAMPLE_TYPE
+TEMPO_WINDOW_SECONDS = analysis_settings.TEMPO_WINDOW_SECONDS
+MAX_ANALYSIS_SECONDS = analysis_settings.MAX_ANALYSIS_SECONDS
+CHUNK_ANALYSIS_SECONDS = analysis_settings.CHUNK_ANALYSIS_SECONDS
+CHUNK_OVERLAP_SECONDS = analysis_settings.CHUNK_OVERLAP_SECONDS
+MIN_CHUNK_DURATION_SECONDS = analysis_settings.MIN_CHUNK_DURATION_SECONDS
+KEY_ANALYSIS_SAMPLE_RATE = analysis_settings.KEY_ANALYSIS_SAMPLE_RATE
+MAX_CHUNK_BATCHES = analysis_settings.MAX_CHUNK_BATCHES
+CHUNK_ANALYSIS_ENABLED = analysis_settings.CHUNK_ANALYSIS_ENABLED
+CHUNK_BEAT_TARGET = analysis_settings.CHUNK_BEAT_TARGET
+CONSENSUS_STD_EPS = analysis_settings.CONSENSUS_STD_EPS
+ANALYSIS_WORKERS = analysis_settings.ANALYSIS_WORKERS
+ENABLE_TONAL_EXTRACTOR = analysis_settings.ENABLE_TONAL_EXTRACTOR
+ENABLE_ESSENTIA_DANCEABILITY = analysis_settings.ENABLE_ESSENTIA_DANCEABILITY
+ENABLE_ESSENTIA_DESCRIPTORS = analysis_settings.ENABLE_ESSENTIA_DESCRIPTORS
+def get_build_signature() -> str:
+    try:
+        sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=REPO_ROOT).decode().strip()
+    except Exception:
+        sha = "unknown"
+    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    return f"{sha[:7]}-{timestamp}"
+
+SERVER_BUILD_SIGNATURE = get_build_signature()
+
+DB_PATH = str(CONFIG.db_path)
+CACHE_DIR = str(CONFIG.cache_dir)
+
+configure_database(DB_PATH)
+configure_cache_routes(EXPORT_DIR)
+initialize_database()
+
+# Setup logging with rotation (max 10MB per file, keep 5 backups = ~50MB total)
+from logging.handlers import RotatingFileHandler
+log_file = str(CONFIG.log_file)
+
+# Clear log if --clear-log flag or CLEAR_LOG env var is set
+if '--clear-log' in sys.argv or os.environ.get('CLEAR_LOG', '').lower() in ('1', 'true', 'yes'):
+    if os.path.exists(log_file):
+        open(log_file, 'w').close()
+
+file_handler = RotatingFileHandler(
+    log_file,
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5,
+    encoding='utf-8'
+)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(CACHE_DIR, 'server.log')),
+        file_handler,
         logging.StreamHandler()
     ]
 )
 
 logger = logging.getLogger(__name__)
+logger.info(f"🚀 Server build {SERVER_BUILD_SIGNATURE} (hann shim enabled: {SCIPY_HANN_PATCHED})")
+if not ENABLE_TONAL_EXTRACTOR:
+    logger.info("🎚️ Essentia TonalExtractor disabled (set ENABLE_TONAL_EXTRACTOR=true to re-enable tonal strength).")
+if not ENABLE_ESSENTIA_DANCEABILITY:
+    logger.info("💃 Essentia danceability disabled – using heuristic scorer (set ENABLE_ESSENTIA_DANCEABILITY=true to enable).")
+if not ENABLE_ESSENTIA_DESCRIPTORS:
+    logger.info("📊 Essentia descriptor extractors disabled – using librosa fallbacks (set ENABLE_ESSENTIA_DESCRIPTORS=true to enable).")
 
-# SECURITY: API Key Authentication
+load_calibration_config()
+load_calibration_models()
+load_key_calibration()
+load_bpm_calibration()
+
+DEFAULT_CALIBRATION_HOOKS = CalibrationHooks(
+    apply_scalers=apply_calibration_layer,
+    apply_key=apply_key_calibration,
+    apply_bpm=apply_bpm_calibration,
+    apply_models=apply_calibration_models,
+)
+configure_processing(DEFAULT_CALIBRATION_HOOKS)
+
+
+@app.before_request
+def _ensure_calibration_assets_current():
+    refresh_calibration_assets()
+
+
 def require_api_key(f):
     """Decorator to require API key authentication in production mode"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not PRODUCTION_MODE:
-            # Development mode: no auth required
             return f(*args, **kwargs)
         
-        # Production mode: require API key
         api_key = request.headers.get('X-API-Key')
         
         if not api_key:
             logger.warning(f"❌ Unauthorized request from {request.remote_addr} - No API key")
             return jsonify({'error': 'API key required', 'message': 'Include X-API-Key header'}), 401
         
-        # Validate API key
         if not validate_api_key(api_key):
             logger.warning(f"❌ Invalid API key from {request.remote_addr}: {api_key[:8]}...")
             return jsonify({'error': 'Invalid API key'}), 403
         
-        # Check rate limit
         if not check_rate_limit(api_key):
             logger.warning(f"⚠️ Rate limit exceeded for key {api_key[:8]}...")
             return jsonify({'error': 'Rate limit exceeded', 'message': 'Too many requests'}), 429
         
-        # Log authorized request
         logger.info(f"✅ Authorized request from key {api_key[:8]}...")
         
         return f(*args, **kwargs)
@@ -200,935 +357,99 @@ def check_rate_limit(api_key):
         
         return entry['count'] <= RATE_LIMIT
 
-def log_api_usage(api_key, endpoint, success=True):
-    """Log API usage for analytics and billing"""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT id FROM api_keys WHERE key = ?', (api_key,))
-        result = cursor.fetchone()
-        
-        if result:
-            key_id = result[0]
-            cursor.execute('''
-                INSERT INTO api_usage (api_key_id, endpoint, success, timestamp)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (key_id, endpoint, 1 if success else 0))
 
-# Initialize database
-def init_db():
-    """Create cache database if it doesn't exist"""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS analysis_cache (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                preview_url_hash TEXT UNIQUE NOT NULL,
-                title TEXT NOT NULL,
-                artist TEXT NOT NULL,
-                preview_url TEXT NOT NULL,
-                bpm REAL,
-                bpm_confidence REAL,
-                key TEXT,
-                key_confidence REAL,
-                energy REAL,
-                danceability REAL,
-                acousticness REAL,
-                spectral_centroid REAL,
-                analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                analysis_duration REAL,
-                user_verified INTEGER DEFAULT 0,
-                manual_bpm REAL,
-                manual_key TEXT,
-                bpm_notes TEXT,
-                time_signature TEXT,
-                valence REAL,
-                mood TEXT,
-                loudness REAL,
-                dynamic_range REAL,
-                silence_ratio REAL
-            )
-        ''')
-        
-        # Add new columns to existing tables if they don't exist (migration)
-        try:
-            cursor.execute('ALTER TABLE analysis_cache ADD COLUMN time_signature TEXT')
-        except sqlite3.OperationalError:
-            pass  # Column already exists
-        
-        try:
-            cursor.execute('ALTER TABLE analysis_cache ADD COLUMN valence REAL')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE analysis_cache ADD COLUMN mood TEXT')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE analysis_cache ADD COLUMN loudness REAL')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE analysis_cache ADD COLUMN dynamic_range REAL')
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute('ALTER TABLE analysis_cache ADD COLUMN silence_ratio REAL')
-        except sqlite3.OperationalError:
-            pass
-        
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_hash ON analysis_cache(preview_url_hash)
-        ''')
-        
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_artist_title ON analysis_cache(artist, title)
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS server_stats (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                total_analyses INTEGER DEFAULT 0,
-                cache_hits INTEGER DEFAULT 0,
-                cache_misses INTEGER DEFAULT 0,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Initialize stats if empty
-        cursor.execute('SELECT COUNT(*) FROM server_stats')
-        if cursor.fetchone()[0] == 0:
-            cursor.execute('INSERT INTO server_stats (total_analyses, cache_hits, cache_misses) VALUES (0, 0, 0)')
-        
-        # API Keys table for authentication
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS api_keys (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                key TEXT UNIQUE NOT NULL,
-                name TEXT NOT NULL,
-                email TEXT,
-                active INTEGER DEFAULT 1,
-                daily_limit INTEGER DEFAULT 1000,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_used TIMESTAMP
-            )
-        ''')
-        
-        # API Usage tracking for analytics and billing
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS api_usage (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                api_key_id INTEGER NOT NULL,
-                endpoint TEXT NOT NULL,
-                success INTEGER DEFAULT 1,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (api_key_id) REFERENCES api_keys(id)
-            )
-        ''')
-        
-        # Add indexes for better query performance
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_usage_key ON api_usage(api_key_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_usage_timestamp ON api_usage(timestamp)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_usage_key_date ON api_usage(api_key_id, timestamp)')
-        
-    logger.info(f"Database initialized at {DB_PATH}")
+register_calibration_routes(
+    app,
+    require_api_key=require_api_key,
+    logger=logger,
+    repo_root=REPO_ROOT,
+    key_calibration_path=KEY_CALIBRATION_PATH,
+    load_key_calibration=load_key_calibration,
+)
 
-def get_url_hash(url):
-    """Generate hash for preview URL (for cache lookup)"""
-    return hashlib.sha256(url.encode()).hexdigest()
 
-def check_cache(preview_url):
-    """Check if analysis already exists in cache"""
-    url_hash = get_url_hash(preview_url)
-    
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT bpm, bpm_confidence, key, key_confidence, 
-                   energy, danceability, acousticness, spectral_centroid,
-                   analyzed_at, time_signature, valence, mood, loudness, 
-                   dynamic_range, silence_ratio
-            FROM analysis_cache 
-            WHERE preview_url_hash = ?
-        ''', (url_hash,))
-        
-        result = cursor.fetchone()
-    
-    if result:
-        logger.info(f"✅ CACHE HIT for {preview_url[:50]}...")
-        cached_data = {
-            'bpm': result[0],
-            'bpm_confidence': result[1],
-            'key': result[2],
-            'key_confidence': result[3],
-            'energy': result[4],
-            'danceability': result[5],
-            'acousticness': result[6],
-            'spectral_centroid': result[7],
-            'cached': True,
-            'analyzed_at': result[8]
-        }
-        
-        # Add Phase 1 fields if available (backward compatibility)
-        if len(result) > 9 and result[9] is not None:
-            cached_data['time_signature'] = result[9]
-            cached_data['valence'] = result[10]
-            cached_data['mood'] = result[11]
-            cached_data['loudness'] = result[12]
-            cached_data['dynamic_range'] = result[13]
-            cached_data['silence_ratio'] = result[14]
-        
-        return cached_data
-    
-    logger.info(f"❌ CACHE MISS for {preview_url[:50]}...")
-    return None
+@app.route('/cache/search', methods=['GET'])
+def cache_search_route():
+    return cache_search()
 
-def save_to_cache(preview_url, title, artist, analysis_result, duration):
-    """Save analysis result to cache"""
-    url_hash = get_url_hash(preview_url)
-    
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT OR REPLACE INTO analysis_cache 
-            (preview_url_hash, title, artist, preview_url, 
-             bpm, bpm_confidence, key, key_confidence,
-             energy, danceability, acousticness, spectral_centroid,
-             analysis_duration, time_signature, valence, mood, 
-             loudness, dynamic_range, silence_ratio)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            url_hash,
-            title,
-            artist,
-            preview_url,
-            analysis_result['bpm'],
-            analysis_result['bpm_confidence'],
-            analysis_result['key'],
-            analysis_result['key_confidence'],
-            analysis_result['energy'],
-            analysis_result['danceability'],
-            analysis_result['acousticness'],
-            analysis_result['spectral_centroid'],
-            duration,
-            analysis_result.get('time_signature'),
-            analysis_result.get('valence'),
-            analysis_result.get('mood'),
-            analysis_result.get('loudness'),
-            analysis_result.get('dynamic_range'),
-            analysis_result.get('silence_ratio')
-        ))
-    
-    logger.info(f"💾 Cached analysis for '{title}' by {artist}")
 
-def update_stats(cache_hit):
-    """Update server statistics"""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        if cache_hit:
-            cursor.execute('UPDATE server_stats SET cache_hits = cache_hits + 1, last_updated = CURRENT_TIMESTAMP')
-        else:
-            cursor.execute('UPDATE server_stats SET total_analyses = total_analyses + 1, cache_misses = cache_misses + 1, last_updated = CURRENT_TIMESTAMP')
+@app.route('/cache', methods=['GET'])
+def cache_list_route():
+    return list_cache()
 
-# PHASE 1 ADVANCED ANALYSIS FUNCTIONS
 
-def detect_time_signature(beats, sr):
-    """
-    Detect time signature (3/4, 4/4, 5/4, etc.) from beat patterns.
-    
-    Args:
-        beats: Array of beat frames
-        sr: Sample rate
-    
-    Returns:
-        str: Time signature (e.g., "4/4", "3/4")
-    """
-    if len(beats) < 4:
-        return "4/4"  # Default if not enough beats
-    
-    # Calculate inter-beat intervals
-    beat_times = librosa.frames_to_time(beats, sr=sr)
-    intervals = np.diff(beat_times)
-    
-    # Group beats by analyzing pattern
-    # Look for recurring patterns in beat strength
-    if len(intervals) < 3:
-        return "4/4"
-    
-    # Estimate beats per bar by looking at recurring patterns
-    # Most music is in 4/4, so default to that unless strong evidence otherwise
-    avg_interval = np.mean(intervals)
-    std_interval = np.std(intervals)
-    
-    # If intervals are very regular, likely 4/4
-    if std_interval / avg_interval < 0.15:
-        # Check for waltz pattern (3/4) - every 3rd beat is stronger
-        if len(beats) >= 6:
-            # Simple heuristic: 3/4 has different pattern than 4/4
-            # For now, default to 4/4 for most cases
-            return "4/4"
-    
-    return "4/4"  # Most common time signature
+@app.route('/cache/<int:cache_id>', methods=['DELETE'])
+def cache_delete_route(cache_id: int):
+    return delete_cache_entry(cache_id)
 
-def estimate_valence_and_mood(tempo, key, mode, chroma_sums, energy):
-    """
-    Estimate valence (happy/sad) and mood from musical features.
-    
-    Args:
-        tempo: BPM
-        key: Key index (0-11)
-        mode: "Major" or "Minor"
-        chroma_sums: Chromagram energy sums
-        energy: RMS energy
-    
-    Returns:
-        tuple: (valence (0-1), mood string)
-    """
-    # Valence estimation based on multiple factors
-    valence = 0.5  # Neutral baseline
-    
-    # Tempo contribution (faster = happier)
-    if tempo > 120:
-        valence += 0.2
-    elif tempo < 90:
-        valence -= 0.2
-    
-    # Mode contribution (major = happier)
-    if mode == "Major":
-        valence += 0.15
-    else:
-        valence -= 0.15
-    
-    # Energy contribution (higher energy = more positive)
-    valence += (energy - 0.5) * 0.2
-    
-    # Normalize to 0-1
-    valence = max(0.0, min(1.0, valence))
-    
-    # Determine mood category
-    if valence > 0.65:
-        if tempo > 120:
-            mood = "energetic"
-        else:
-            mood = "happy"
-    elif valence > 0.35:
-        mood = "neutral"
-    else:
-        if tempo < 90:
-            mood = "melancholic"
-        else:
-            mood = "tense"
-    
-    return valence, mood
 
-def calculate_loudness_and_dynamics(y, sr):
-    """
-    Calculate loudness (LUFS-like) and dynamic range.
-    
-    Args:
-        y: Audio time series
-        sr: Sample rate
-    
-    Returns:
-        tuple: (loudness in dB, dynamic_range in dB)
-    """
-    # Calculate RMS energy per frame
-    rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=512)[0]
-    
-    # Convert to dB
-    rms_db = librosa.amplitude_to_db(rms, ref=np.max)
-    
-    # Loudness: integrated average (similar to LUFS)
-    loudness = float(np.mean(rms_db))
-    
-    # Dynamic range: difference between loud and quiet parts
-    # Use percentiles to avoid outliers
-    loud_threshold = np.percentile(rms_db, 95)
-    quiet_threshold = np.percentile(rms_db, 10)
-    dynamic_range = float(loud_threshold - quiet_threshold)
-    
-    return loudness, dynamic_range
+@app.route('/cache/clear', methods=['POST'])
+def cache_clear_route():
+    return clear_cache()
 
-def detect_silence_ratio(y, sr, threshold_db=-40):
-    """
-    Detect ratio of silence in the audio.
-    
-    Args:
-        y: Audio time series
-        sr: Sample rate
-        threshold_db: Silence threshold in dB
-    
-    Returns:
-        float: Ratio of silent frames (0-1)
-    """
-    # Calculate RMS energy per frame
-    rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=512)[0]
-    
-    # Convert to dB
-    rms_db = librosa.amplitude_to_db(rms, ref=np.max)
-    
-    # Count silent frames
-    silent_frames = np.sum(rms_db < threshold_db)
-    total_frames = len(rms_db)
-    
-    silence_ratio = float(silent_frames / total_frames) if total_frames > 0 else 0.0
-    
-    return silence_ratio
 
-def perform_audio_analysis(y, sr, title, artist):
-    """
-    Shared audio analysis logic for both analyze and analyze_data endpoints.
-    Performs BPM, key, and audio feature detection.
-    
-    Args:
-        y: Audio time series (numpy array)
-        sr: Sample rate
-        title: Song title (for logging)
-        artist: Artist name (for logging)
-    
-    Returns:
-        dict: Analysis results with bpm, key, energy, etc.
-    """
-    start_time = time.time()
-    
-    # Skip first 0.5 seconds (intro/silence can confuse beat detection)
-    trim_samples = int(0.5 * sr)
-    y_trimmed = y[trim_samples:] if len(y) > trim_samples else y
-    
-    # Harmonic-percussive separation for better beat tracking
-    y_harmonic, y_percussive = librosa.effects.hpss(y_trimmed)
-    
-    # 1. ENHANCED TEMPO/BPM DETECTION
-    
-    # Method 1: Beat tracking on percussive component (most reliable for rhythm)
-    tempo_percussive, beats = librosa.beat.beat_track(y=y_percussive, sr=sr)
-    
-    # Method 2: Tempo estimation from onset envelope (good for complex rhythms)
-    onset_env = librosa.onset.onset_strength(y=y_percussive, sr=sr)
-    tempo_onset = librosa.feature.tempo(onset_envelope=onset_env, sr=sr)[0]
-    
-    # Convert numpy arrays to Python floats immediately
-    tempo_percussive_float = float(tempo_percussive.flatten()[0] if isinstance(tempo_percussive, np.ndarray) else tempo_percussive)
-    tempo_onset_float = float(tempo_onset.flatten()[0] if isinstance(tempo_onset, np.ndarray) else tempo_onset)
-    
-    logger.info(f"🎯 BPM Detection - Method 1 (beat_track): {tempo_percussive_float:.1f}, Method 2 (onset): {tempo_onset_float:.1f}")
-    
-    # Aggregate tempos: choose the most consistent one
-    if abs(tempo_percussive_float - tempo_onset_float) / tempo_onset_float < 0.02:
-        tempo = (tempo_percussive_float + tempo_onset_float) / 2
-        bpm_confidence = 0.95
-        logger.info(f"✅ BPM methods agree: using average {tempo:.1f}")
-    else:
-        # Check for double-time/half-time
-        ratio = tempo_percussive_float / tempo_onset_float
-        if 1.8 < ratio < 2.2:
-            tempo = tempo_onset_float
-            bpm_confidence = 0.75
-            logger.info(f"⚠️ Double-time detected: using {tempo:.1f} BPM")
-        elif 0.45 < ratio < 0.55:
-            tempo = tempo_percussive_float
-            bpm_confidence = 0.75
-            logger.info(f"⚠️ Half-time detected: using {tempo:.1f} BPM")
-        else:
-            tempo = tempo_percussive_float
-            bpm_confidence = 0.65
-            logger.info(f"⚠️ BPM methods disagree: using beat_track result {tempo:.1f}")
-    
-    # Additional confidence boost from beat strength consistency
-    if len(beats) > 0:
-        beat_strengths = onset_env[beats]
-        std_val = float(np.std(beat_strengths))
-        mean_val = float(np.mean(beat_strengths))
-        beat_consistency = 1.0 - min(std_val / (mean_val + 1e-6), 1.0)
-        bpm_confidence = float((bpm_confidence + beat_consistency) / 2)
-    
-    bpm_confidence = float(max(0.0, min(1.0, bpm_confidence)))
-    
-    # 2. KEY DETECTION
-    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
-    chroma_sums = np.sum(chroma, axis=1)
-    key_idx = int(np.argmax(chroma_sums))
-    keys = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-    key = keys[key_idx]
-    
-    # Key confidence based on dominant chroma strength
-    total_chroma = float(np.sum(chroma_sums))
-    key_confidence = float(chroma_sums[key_idx]) / (total_chroma + 1e-6)
-    
-    # Detect major/minor
-    major_third_idx = (key_idx + 4) % 12
-    minor_third_idx = (key_idx + 3) % 12
-    scale = "Major" if float(chroma_sums[major_third_idx]) > float(chroma_sums[minor_third_idx]) else "Minor"
-    full_key = f"{key} {scale}"
-    
-    # 3. AUDIO FEATURES
-    
-    # Energy (RMS energy)
-    rms = librosa.feature.rms(y=y)
-    energy = min(float(np.mean(rms)) * 3, 1.0)
-    
-    # Spectral centroid (brightness)
-    spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
-    avg_centroid = float(np.mean(spectral_centroid))
-    
-    # Acousticness (inverse of brightness)
-    brightness = avg_centroid / 4000.0
-    acousticness = 1.0 - min(brightness, 1.0)
-    
-    # Danceability (beat strength + regularity)
-    tempogram = librosa.feature.tempogram(onset_envelope=onset_env, sr=sr)
-    beat_strength = float(np.mean(tempogram))
-    tempogram_std = float(np.std(tempogram))
-    tempogram_mean = float(np.mean(tempogram))
-    beat_regularity = 1.0 - (tempogram_std / (tempogram_mean + 1e-6))
-    danceability = min((beat_strength * 2 + beat_regularity) / 2, 1.0)
-    
-    # 4. PHASE 1 ADVANCED FEATURES
-    
-    # Time signature detection
-    time_signature = detect_time_signature(beats, sr)
-    logger.info(f"🎼 Time signature: {time_signature}")
-    
-    # Valence and mood estimation
-    valence, mood = estimate_valence_and_mood(
-        bpm_value := float(tempo.flatten()[0] if isinstance(tempo, np.ndarray) else tempo),
-        key_idx,
-        scale,
-        chroma_sums,
-        energy
-    )
-    logger.info(f"😊 Mood: {mood} (valence: {valence:.2f})")
-    
-    # Loudness and dynamic range
-    loudness, dynamic_range = calculate_loudness_and_dynamics(y, sr)
-    logger.info(f"🔊 Loudness: {loudness:.1f} dB, Dynamic range: {dynamic_range:.1f} dB")
-    
-    # Silence detection
-    silence_ratio = detect_silence_ratio(y, sr)
-    logger.info(f"🔇 Silence ratio: {silence_ratio:.1%}")
-    
-    duration = time.time() - start_time
-    
-    result = {
-        'bpm': bpm_value,
-        'bpm_confidence': bpm_confidence,
-        'key': full_key,
-        'key_confidence': key_confidence,
-        'energy': energy,
-        'danceability': danceability,
-        'acousticness': acousticness,
-        'spectral_centroid': avg_centroid,
-        'time_signature': time_signature,
-        'valence': valence,
-        'mood': mood,
-        'loudness': loudness,
-        'dynamic_range': dynamic_range,
-        'silence_ratio': silence_ratio,
-        'analysis_duration': duration,
-        'cached': False
-    }
-    
-    logger.info(f"✅ Analysis complete in {duration:.2f}s - BPM: {bpm_value:.1f}, Key: {full_key}, Mood: {mood}")
-    return result
-
-def analyze_audio(audio_url, title, artist):
-    """Perform audio analysis using librosa"""
-    logger.info(f"🎵 Analyzing '{title}' by {artist}...")
-    
-    try:
-        # Download audio with explicit timeout
-        response = requests.get(audio_url, timeout=30)
-        if response.status_code != 200:
-            raise Exception(f"Failed to download audio: HTTP {response.status_code}")
-        
-        audio_data = BytesIO(response.content)
-        logger.info(f"📥 Downloaded {len(response.content) / 1024:.1f}KB")
-        
-        # Load with librosa
-        y, sr = librosa.load(audio_data, duration=30, sr=22050)
-        logger.info(f"🔊 Loaded audio: {len(y)} samples at {sr}Hz")
-        
-        # Use shared analysis function
-        result = perform_audio_analysis(y, sr, title, artist)
-        return result
-        
-    except Exception as e:
-        logger.error(f"❌ Analysis failed: {str(e)}")
-        raise
+@app.route('/cache/export', methods=['GET'])
+def cache_export_route():
+    return export_cache()
 
 # API ENDPOINTS
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        'running': True,
-        'port': DEFAULT_PORT,
-        'version': '1.0.0',
-        'status': 'healthy',
-        'server': 'Mac Studio Audio Analysis Server',
-        'timestamp': datetime.now().isoformat()
-    })
 
-@app.route('/stats', methods=['GET'])
-def get_stats():
-    """Get server statistics"""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT total_analyses, cache_hits, cache_misses, last_updated FROM server_stats LIMIT 1')
-        stats = cursor.fetchone()
-        
-        cursor.execute('SELECT COUNT(*) FROM analysis_cache')
-        total_cached = cursor.fetchone()[0]
-    
-    total = stats[0] if stats else 0
-    hits = stats[1] if stats else 0
-    misses = stats[2] if stats else 0
-    last_updated = stats[3] if stats and len(stats) > 3 else datetime.now().isoformat()
-    
-    hit_rate = (hits / (hits + misses)) if (hits + misses) > 0 else 0.0
-    
-    return jsonify({
-        'total_analyses': total,
-        'cache_hits': hits,
-        'cache_misses': misses,
-        'cache_hit_rate': hit_rate,
-        'last_updated': last_updated,
-        'total_cached_songs': total_cached
-    })
+register_admin_routes(
+    app,
+    logger=logger,
+    default_port=DEFAULT_PORT,
+    production_mode=PRODUCTION_MODE,
+    server_build_signature=SERVER_BUILD_SIGNATURE,
+    db_path=DB_PATH,
+    cache_dir=CACHE_DIR,
+    analysis_config={
+        "sample_rate": ANALYSIS_SAMPLE_RATE,
+        "fft_size": ANALYSIS_FFT_SIZE,
+        "max_duration": MAX_ANALYSIS_SECONDS,
+        "workers": ANALYSIS_WORKERS,
+        "chunk_analysis_enabled": CHUNK_ANALYSIS_ENABLED,
+    },
+    feature_flags={
+        "tonal_extractor": ENABLE_TONAL_EXTRACTOR,
+        "essentia_danceability": ENABLE_ESSENTIA_DANCEABILITY,
+        "essentia_descriptors": ENABLE_ESSENTIA_DESCRIPTORS,
+    },
+    export_dir=str(EXPORT_DIR),
+    has_essentia=HAS_ESSENTIA,
+    scipy_hann_patched=SCIPY_HANN_PATCHED,
+    get_db_connection=get_db_connection,
+    get_url_hash=get_url_hash,
+)
 
-@app.route('/analyze', methods=['POST'])
-@require_api_key
-def analyze():
-    """Main analysis endpoint"""
-    try:
-        data = request.get_json()
-        
-        if not data or 'url' not in data:
-            return jsonify({'error': 'Missing preview URL'}), 400
-        
-        preview_url = data['url']
-        title = data.get('title', 'Unknown')
-        artist = data.get('artist', 'Unknown')
-        
-        logger.info(f"📨 Request: '{title}' by {artist}")
-        
-        # Check cache first
-        cached_result = check_cache(preview_url)
-        
-        if cached_result:
-            update_stats(cache_hit=True)
-            return jsonify(cached_result)
-        
-        # Cache miss - analyze
-        result = analyze_audio(preview_url, title, artist)
-        
-        # Save to cache
-        save_to_cache(preview_url, title, artist, result, result['analysis_duration'])
-        update_stats(cache_hit=False)
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        logger.error(f"❌ Error: {str(e)}")
-        return jsonify({
-            'error': str(e),
-            'message': 'Analysis failed'
-        }), 500
+register_analysis_routes(
+    app,
+    logger=logger,
+    require_api_key=require_api_key,
+    process_audio_bytes=process_audio_bytes,
+    check_cache=check_cache,
+    save_to_cache=save_to_cache,
+    update_stats=update_stats,
+    max_analysis_seconds=MAX_ANALYSIS_SECONDS,
+    analysis_workers=ANALYSIS_WORKERS,
+    error_hint_from_exception=error_hint_from_exception,
+)
 
-@app.route('/analyze_data', methods=['POST'])
-@require_api_key
-def analyze_data():
-    """Analyze audio data sent directly from iOS (Apple Music previews require iOS auth)"""
-    import tempfile
-    
-    try:
-        # Get audio data from request body
-        audio_data = request.get_data()
-        
-        if not audio_data:
-            return jsonify({'error': 'No audio data provided'}), 400
-        
-        # Get metadata from headers
-        title = request.headers.get('X-Song-Title', 'Unknown')
-        artist = request.headers.get('X-Song-Artist', 'Unknown')
-        
-        logger.info(f"📨 Analyzing audio data for '{title}' by {artist}")
-        logger.info(f"📦 Received {len(audio_data) / 1024:.1f}KB of audio data")
-        
-        # Create a cache key based on title + artist (since we don't have a URL)
-        cache_key = f"audiodata://{artist}/{title}"
-        
-        # Check cache first
-        cached_result = check_cache(cache_key)
-        if cached_result:
-            logger.info("✅ Found in cache")
-            update_stats(cache_hit=True)
-            return jsonify(cached_result)
-        
-        # Analyze the audio data
-        # Save audio data to temporary file (librosa handles M4A files better from disk)
-        temp_fd, temp_path = tempfile.mkstemp(suffix='.m4a')
-        try:
-            os.write(temp_fd, audio_data)
-            os.close(temp_fd)
-            logger.info(f"💾 Saved to temp file: {temp_path}")
-            
-            # Load with librosa - it will use audioread backend for M4A
-            y, sr = librosa.load(temp_path, duration=30, sr=22050)
-            logger.info(f"🔊 Loaded audio: {len(y)} samples at {sr}Hz")
-            
-            # Use shared analysis function
-            result = perform_audio_analysis(y, sr, title, artist)
-            
-            # Save to cache
-            save_to_cache(cache_key, title, artist, result, result['analysis_duration'])
-            update_stats(cache_hit=False)
-            
-            return jsonify(result)
-            
-        finally:
-            # Clean up temp file
-            try:
-                if os.path.exists(temp_path):
-                    os.unlink(temp_path)
-                    logger.info(f"🗑️ Cleaned up temp file")
-            except Exception as cleanup_error:
-                logger.warning(f"⚠️ Could not clean up temp file: {cleanup_error}")
-        
-    except Exception as e:
-        logger.error(f"❌ Error analyzing audio data: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'error': str(e),
-            'message': 'Analysis failed'
-        }), 500
 
-@app.route('/cache/search', methods=['GET'])
-@require_api_key
-def search_cache():
-    """Search cached analyses"""
-    query = request.args.get('q', '')
-    
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        sql = '''
-            SELECT id, title, artist, preview_url, bpm, bpm_confidence, key, key_confidence,
-                   energy, danceability, acousticness, spectral_centroid, analyzed_at,
-                   analysis_duration, user_verified, manual_bpm, manual_key, bpm_notes
-            FROM analysis_cache
-            WHERE artist LIKE ? OR title LIKE ?
-            ORDER BY analyzed_at DESC
-            LIMIT 100
-        '''
-        
-        cursor.execute(sql, (f"%{query}%", f"%{query}%"))
-        results = cursor.fetchall()
-    
-    songs = [{
-        'id': r[0],
-        'title': r[1],
-        'artist': r[2],
-        'preview_url': r[3],
-        'bpm': r[4],
-        'bpm_confidence': r[5],
-        'key': r[6],
-        'key_confidence': r[7],
-        'energy': r[8],
-        'danceability': r[9],
-        'acousticness': r[10],
-        'spectral_centroid': r[11],
-        'analyzed_at': r[12],
-        'analysis_duration': r[13],
-        'user_verified': bool(r[14]),
-        'manual_bpm': r[15],
-        'manual_key': r[16],
-        'bpm_notes': r[17]
-    } for r in results]
-    
-    return jsonify(songs)
-
-@app.route('/cache', methods=['GET'])
-def get_cache():
-    """Get cached analyses with pagination"""
-    limit = request.args.get('limit', 100, type=int)
-    offset = request.args.get('offset', 0, type=int)
-    
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT id, title, artist, preview_url, bpm, bpm_confidence, key, key_confidence,
-                   energy, danceability, acousticness, spectral_centroid, analyzed_at,
-                   analysis_duration, user_verified, manual_bpm, manual_key, bpm_notes
-            FROM analysis_cache
-            ORDER BY analyzed_at DESC
-            LIMIT ? OFFSET ?
-        ''', (limit, offset))
-        
-        results = cursor.fetchall()
-    
-    songs = [{
-        'id': r[0],
-        'title': r[1],
-        'artist': r[2],
-        'preview_url': r[3],
-        'bpm': r[4],
-        'bpm_confidence': r[5],
-        'key': r[6],
-        'key_confidence': r[7],
-        'energy': r[8],
-        'danceability': r[9],
-        'acousticness': r[10],
-        'spectral_centroid': r[11],
-        'analyzed_at': r[12],
-        'analysis_duration': r[13],
-        'user_verified': bool(r[14]),
-        'manual_bpm': r[15],
-        'manual_key': r[16],
-        'bpm_notes': r[17]
-    } for r in results]
-    
-    return jsonify(songs)
-
-@app.route('/cache/<int:cache_id>', methods=['DELETE'])
-def delete_cache_item(cache_id):
-    """Delete a specific cached analysis"""
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM analysis_cache WHERE id = ?', (cache_id,))
-        
-        logger.info(f"🗑️ Deleted cache item {cache_id}")
-        
-        return jsonify({
-            'success': True,
-            'message': f'Deleted cache item {cache_id}'
-        })
-    except Exception as e:
-        logger.error(f"❌ Error deleting cache item: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/cache/clear', methods=['POST'])
-def clear_cache():
-    """Clear all cached analyses"""
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM analysis_cache')
-            cursor.execute('UPDATE server_stats SET total_analyses = 0, cache_hits = 0, cache_misses = 0')
-        
-        logger.info("🗑️ Cleared all cache")
-        
-        return jsonify({
-            'success': True,
-            'message': 'Cache cleared'
-        })
-    except Exception as e:
-        logger.error(f"❌ Error clearing cache: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/cache/export', methods=['GET'])
-def export_cache():
-    """Export entire cache as JSON"""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT title, artist, bpm, key, energy, danceability, acousticness, analyzed_at
-            FROM analysis_cache
-            ORDER BY artist, title
-        ''')
-        
-        results = cursor.fetchall()
-    
-    songs = [{
-        'title': r[0],
-        'artist': r[1],
-        'bpm': r[2],
-        'key': r[3],
-        'energy': r[4],
-        'danceability': r[5],
-        'acousticness': r[6],
-        'analyzed_at': r[7]
-    } for r in results]
-    
-    return jsonify({
-        'total_songs': len(songs),
-        'exported_at': datetime.now().isoformat(),
-        'songs': songs
-    })
-
-@app.route('/shutdown', methods=['POST'])
-def shutdown():
-    """Shutdown the server"""
-    logger.info("🛑 Server shutdown requested")
-    func = request.environ.get('werkzeug.server.shutdown')
-    if func is None:
-        return jsonify({'error': 'Not running with Werkzeug Server'}), 500
-    func()
-    return jsonify({'message': 'Server shutting down...'})
-
-@app.route('/verify', methods=['POST'])
-def verify_manual():
-    """Manual verification and override endpoint"""
-    try:
-        data = request.get_json()
-        
-        if not data or 'url' not in data:
-            return jsonify({'error': 'Missing preview URL'}), 400
-        
-        preview_url = data['url']
-        url_hash = get_url_hash(preview_url)
-        
-        # Optional manual overrides
-        manual_bpm = data.get('manual_bpm')
-        manual_key = data.get('manual_key')
-        bpm_notes = data.get('bpm_notes')  # e.g., "Starts at 82, goes to 168"
-        
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Update verification status and manual overrides
-            cursor.execute('''
-                UPDATE analysis_cache 
-                SET user_verified = 1,
-                    manual_bpm = ?,
-                    manual_key = ?,
-                    bpm_notes = ?
-                WHERE preview_url_hash = ?
-            ''', (manual_bpm, manual_key, bpm_notes, url_hash))
-        
-        logger.info(f"✅ User verified: {data.get('title', 'Unknown')} - Manual BPM: {manual_bpm}, Notes: {bpm_notes}")
-        
-        return jsonify({
-            'success': True,
-            'message': 'Song verified and updated'
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Verification error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='Mac Studio Audio Analysis Server')
+    parser.add_argument('--clear-log', action='store_true', 
+                       help='Clear the log file on startup (default: keep existing logs)')
+    args = parser.parse_args()
+    
     print("=" * 60)
     print("🎵 Mac Studio Audio Analysis Server")
     print("=" * 60)
     print(f"📂 Database: {DB_PATH}")
     print(f"📁 Cache Dir: {CACHE_DIR}")
-    print("🚀 Initializing...")
-    
-    init_db()
-    
+    print("🚀 Database + cache initialized.")
     print("✅ Server ready!")
     
     # Determine bind host
@@ -1148,4 +469,7 @@ if __name__ == '__main__':
             print("⚠️ Network: Accessible to other devices that can reach this host")
     print("=" * 60)
     
-    app.run(host=bind_host, port=DEFAULT_PORT, debug=False)
+    # Enable threading to handle concurrent requests from Swift TaskGroup
+    # threaded=True allows Flask to handle multiple requests simultaneously
+    # This works with the ProcessPoolExecutor (8 workers) for true parallelism
+    app.run(host=bind_host, port=DEFAULT_PORT, debug=False, threaded=True)

@@ -1,232 +1,91 @@
-# Mac Studio Server Simulator - Xcode Project
+# Mac Studio Server Manager (macOS)
 
 ## Overview
 
-This Xcode project allows you to test the Mac Studio Audio Analysis Server from the iOS Simulator or a real iOS device.
+This target is now a **native macOS control panel** for the Python-based Mac Studio Audio Analysis Server. Build it for “My Mac” and you can start/stop the backend, monitor live statistics, browse the cache, and tail server logs without touching Terminal. Your iOS app (or any HTTP client) continues to analyze audio by calling the `/analyze` endpoints—this app simply keeps the macOS host healthy.
 
 ## Features
 
-- Test server connection and status
-- Analyze audio from URLs
-- View Phase 1 advanced analysis features:
-  - Time signature detection
-  - Mood and valence estimation
-  - Loudness and dynamic range
-  - Silence detection
-- View server statistics and cache performance
+- **One-click server lifecycle** – launch the bundled `analyze_server.py`, stop it via `/shutdown`, or restart it from the toolbar/keyboard shortcuts.
+- **Real-time telemetry** – view total analyses, cache hits/misses, hit rate, and database metadata on the Overview tab.
+- **Cache browser** – search cached tracks, inspect BPM/key/confidence values, and delete or clear entries directly.
+- **Log tailing** – stream the last 200 lines of `~/Music/AudioAnalysisCache/server.log`, toggle auto-refresh, or copy logs to the clipboard.
+- **Desktop-native UI** – AppKit commands, hidden title bar, Finder integration for the database location, and keyboard shortcuts (⌘S / ⇧⌘S / ⌘R).
 
 ## Prerequisites
 
-1. **Mac with Xcode** (Xcode 15.0 or later recommended)
-2. **Mac Studio Server Running** - The Python server must be running:
-   ```bash
-   cd backend/
-   python3 analyze_server.py
-   ```
-3. **iOS 17.0+** for the simulator
+1. **macOS 14+ with Xcode 15+** (the scheme now targets macOS, not iOS).
+2. **Python 3** plus the audio stack (`pip3 install -r backend/requirements.txt`).
+3. `backend/analyze_server.py` present in the repo (the app launches this script).
+4. Optional: run `backend/quickstart.sh` to verify dependencies and port availability before opening Xcode.
 
-## Setup Instructions
+## Setup & Run
 
-### 1. Open the Project
+1. Open the workspace: `open MacStudioServerSimulator.xcworkspace`.
+2. In the scheme selector choose **My Mac (Designed for Mac)** or any macOS destination.
+3. (First run) Go to *Signing & Capabilities* and pick your Apple ID so Xcode can codesign the macOS binary.
+4. Press **⌘R**. The window loads the new `ServerManagementView`.
+5. Click **Start Server** – the app now refuses to launch unless `~/Documents/GitHub/EssentiaServer/.venv/bin/python` (or your explicit `MacStudioServerPython` override) exists, so run `.venv/bin/pip install -r requirements-calibration.txt` or `tools/verify_python_setup.sh` first. Once available, the GUI runs `.venv/bin/python backend/analyze_server.py`, waits for it to bind to port 5050, and begins polling `/health`.
 
-```bash
-cd EssentiaServer
-open MacStudioServerSimulator.xcworkspace
-```
+### Customizing the script path
 
-Or double-click `MacStudioServerSimulator.xcworkspace` in Finder.
-
-### 2. Configure Code Signing (First Time Only)
-
-When you first open the project, Xcode may show a signing error. To fix:
-
-1. In Xcode, select the project in the navigator (blue icon)
-2. Select the "MacStudioServerSimulator" target
-3. Go to the "Signing & Capabilities" tab
-4. Under "Team", select your Apple ID or development team
-   - If you don't have one, click "Add an Account..." to sign in
-   - For simulator testing only, you can use your personal Apple ID
-5. Xcode will automatically manage signing for you
-
-**Note**: Code signing is required even for simulator builds. You don't need a paid developer account for simulator testing.
-
-### 3. Start the Python Server
-
-Before running the simulator, start the backend server:
+If your project lives somewhere else, point the app at the correct script without rebuilding:
 
 ```bash
-cd backend/
-python3 analyze_server.py
+defaults write com.macstudio.serversimulator MacStudioServerScriptPath "/path/to/analyze_server.py"
+# Optional: override Python interpreter
+defaults write com.macstudio.serversimulator MacStudioServerPython "/usr/local/bin/python3"
 ```
 
-You should see:
-```
-🎵 Mac Studio Audio Analysis Server
-📡 Listening on http://127.0.0.1:5050
-```
+Remove either key with `defaults delete com.macstudio.serversimulator MacStudioServerScriptPath`.
 
-### 4. Run in Simulator
+## Using the App
 
-1. In Xcode, select a simulator (iPhone 15 Pro recommended)
-2. Click the Play button or press `Cmd+R`
-3. The app will launch in the simulator
-
-### 5. Test the Connection
-
-1. In the app, tap "Check Status"
-2. If the server is running, you'll see a green "Connected" indicator
-3. View the server statistics below
-
-## Using the Simulator
-
-### Test Audio Analysis
-
-1. Navigate to "Audio Analysis Test"
-2. Enter a preview URL (or use the default test URL)
-3. Enter song title and artist
-4. Tap "Analyze Audio"
-5. View the results including:
-   - Core metrics (BPM, key, energy, etc.)
-   - Phase 1 features (mood, loudness, silence ratio, etc.)
-
-### View Phase 1 Features
-
-1. Navigate to "Phase 1 Features Test"
-2. See descriptions of all Phase 1 capabilities
-3. Test different scenarios
-
-## Configuration
-
-### Change Server Port
-
-If your server is running on a different port:
-
-1. In the app, change the port number in the "Port" field
-2. Tap "Check Status" to reconnect
-
-### Use on Real Device
-
-To test with a real iPhone/iPad:
-
-1. Ensure your device and Mac are on the same network
-2. Update `MacStudioServerManager.swift`:
-   ```swift
-   private var baseURL: String {
-       #if targetEnvironment(simulator)
-       return "http://127.0.0.1:\(serverPort)"
-       #else
-       return "http://YOUR-MAC-IP:\(serverPort)"  // Change this
-       #endif
-   }
-   ```
-3. Replace `YOUR-MAC-IP` with your Mac's local IP address
-4. Build and run on your device
+- **Header controls** report run state, surface errors, and expose Start/Stop/Restart plus a manual refresh. Status automatically updates when the Python process exits.
+- **Overview tab** pulls `/stats` and database metadata so you can sanity-check cache growth or open the DB folder in Finder.
+- **Cache tab** wraps `/cache`, `/cache/search`, `/cache/{id}`, and `/cache/clear` with search, refresh, delete, and bulk-clear actions.
+- **Logs tab** tails `server.log`, optionally auto-refreshes every two seconds, and includes a Copy button for quick sharing.
 
 ## Project Structure
 
 ```
 MacStudioServerSimulator/
-├── MacStudioServerSimulator.xcworkspace/     # Xcode workspace
+├── MacStudioServerSimulator.xcworkspace
 ├── MacStudioServerSimulator/
-│   ├── MacStudioServerSimulator.xcodeproj/   # Xcode project
-│   └── MacStudioServerSimulator/             # Source code
-│       ├── MacStudioServerSimulatorApp.swift # App entry point
-│       ├── ContentView.swift                 # Main view
-│       ├── ServerTestView.swift              # Audio analysis test
-│       ├── Models/
-│       │   └── ServerModels.swift            # Data models
-│       └── Services/
-│           └── MacStudioServerManager.swift  # API client
+│   ├── MacStudioServerSimulator.xcodeproj
+│   └── MacStudioServerSimulator/
+│       ├── MacStudioServerSimulatorApp.swift   # SwiftUI @main w/ AppKit commands
+│       ├── ServerManagementView.swift          # macOS UI (status, cache, logs)
+│       ├── ServerTestView.swift                # Legacy analyzer playground (optional)
+│       ├── Models/ServerModels.swift           # Codable API models + helpers
+│       └── Services/MacStudioServerManager.swift # REST client + local process control
 ```
 
-## API Endpoints Tested
+## API Surface
 
-- `GET /health` - Server health check
-- `GET /stats` - Server statistics
-- `POST /analyze` - Analyze audio from URL
-- `POST /analyze_data` - Analyze audio data directly
+The app calls the same REST endpoints your iOS client uses:
 
-## Example Test Workflow
-
-1. **Start the server** on your Mac
-2. **Open the Xcode project**
-3. **Run in simulator**
-4. **Check server status** - Verify connection
-5. **Test audio analysis** with a sample URL:
-   - Use an Apple Music preview URL
-   - View BPM, key, energy, etc.
-   - Check Phase 1 features (mood, loudness, etc.)
-6. **View server stats** - See cache performance
+- `GET /health` – verify the Python server is alive.
+- `GET /stats` – show totals, hit rate, DB path.
+- `GET /cache`, `GET /cache/search`, `DELETE /cache/{id}`, `POST /cache/clear` – manage cached analyses.
+- `POST /shutdown` – stop the Python process gracefully.
+- `POST /analyze`, `POST /analyze_data` – still available via `ServerTestView` or external clients.
 
 ## Troubleshooting
 
-### "Signing for MacStudioServerSimulator requires a development team"
+| Issue | Fix |
+| --- | --- |
+| **“Could not find analyze_server.py”** | Update the script path using `defaults write ... MacStudioServerScriptPath`. |
+| **Port 5050 already in use** | Stop other instances (`lsof -ti:5050 | xargs kill`) or run `backend/quickstart.sh` to resolve conflicts. |
+| **Server exits immediately** | Check `~/Music/AudioAnalysisCache/server.log` from the Logs tab; dependency errors are surfaced there. |
+| **API requests fail with auth errors** | Ensure the API key in `MacStudioServerManager` matches the backend’s configuration (see `backend/PRODUCTION_SECURITY.md`). |
+| **Still targeting iOS simulators** | Select the **MacStudioServerSimulator** scheme and choose a **My Mac** destination; the deployment target is now macOS 14. |
 
-This error appears when opening the project for the first time. To fix:
+## Related Documentation
 
-1. Open the project in Xcode
-2. Select the project in the navigator (blue "MacStudioServerSimulator" icon at the top)
-3. Select the "MacStudioServerSimulator" target
-4. Click the "Signing & Capabilities" tab
-5. Under "Team", select your Apple ID from the dropdown
-   - If you don't see your Apple ID, click "Add an Account..." and sign in
-   - A free Apple ID works fine for simulator testing
-6. Check "Automatically manage signing"
-7. Build and run (`Cmd+R`)
+- `backend/README.md` – Python server quick start and API contract.
+- `backend/PHASE1_FEATURES.md` – details of the advanced analysis metrics surfaced in the UI.
+- `backend/PRODUCTION_SECURITY.md` – API key management and rate limiting.
+- `backend/PERFORMANCE_OPTIMIZATIONS.md` – server performance work.
 
-**Note**: You don't need a paid developer account to run in the simulator.
-
-### "Cannot connect to server"
-
-- Ensure the Python server is running: `python3 analyze_server.py`
-- Check the port number (default: 5050)
-- If using a real device, verify network connectivity
-
-### "Invalid API response"
-
-- Server might be outdated - pull latest changes
-- Check server logs for errors
-
-### Xcode Build Errors
-
-- Clean build folder: `Cmd+Shift+K`
-- Rebuild: `Cmd+B`
-- Check iOS deployment target is 17.0+
-
-## Phase 1 Features in the Simulator
-
-The simulator fully supports testing all Phase 1 features:
-
-1. **Time Signature** - See detected time signature (3/4, 4/4, etc.)
-2. **Valence** - Emotional positivity score (0-1)
-3. **Mood** - Category (energetic, happy, neutral, tense, melancholic)
-4. **Loudness** - LUFS-like measurement in dB
-5. **Dynamic Range** - Difference between loud and quiet (dB)
-6. **Silence Ratio** - Percentage of silent frames
-
-## Performance Testing
-
-Use the simulator to:
-- Test cache performance (watch cache hit rate increase)
-- Verify analysis speed (should be <5 seconds)
-- Test concurrent requests
-- Monitor server statistics
-
-## Next Steps
-
-After testing in the simulator:
-- Test on a real iOS device
-- Integrate into your main iOS app
-- Test Phase 2 features when available
-- Build production workflows
-
-## Support
-
-For issues or questions:
-1. Check the server logs: `backend/~/Music/AudioAnalysisCache/server.log`
-2. Review the main documentation: `backend/README.md`
-3. Check Phase 1 documentation: `backend/PHASE1_FEATURES.md`
-
----
-
-**Happy Testing! 🎵**
+Happy analyzing! 🎧

@@ -1,0 +1,13 @@
+test_type,song_title,artist,file_type,success,duration_s,bpm,key,energy,danceability,valence,acousticness,instrumentalness,liveness,speechiness,error
+Test A: 6 previews,Cyrus_Prisoner__feat__Dua_Lipa_,Miley,preview,False,17.875832080841064,,,,,,,,,,"{""error"":""name 'logger' is not defined"",""message"":""Analysis failed""}
+"
+Test A: 6 previews,Green_Forget_You,CeeLo,preview,False,17.820170879364014,,,,,,,,,,"{""error"":""name 'logger' is not defined"",""message"":""Analysis failed""}
+"
+Test A: 6 previews,___Song_Fomerly_Known_As_,Regurgitator,preview,False,17.850507020950317,,,,,,,,,,"{""error"":""name 'logger' is not defined"",""message"":""Analysis failed""}
+"
+Test A: 6 previews,Smith___Broods_1000x,Jarryd,preview,False,17.807154893875122,,,,,,,,,,"{""error"":""name 'logger' is not defined"",""message"":""Analysis failed""}
+"
+Test A: 6 previews,Girls_2_Become_1,Spice,preview,False,17.836825132369995,,,,,,,,,,"{""error"":""name 'logger' is not defined"",""message"":""Analysis failed""}
+"
+Test A: 6 previews,20_3am,Matchbox,preview,False,17.882796049118042,,,,,,,,,,"{""error"":""name 'logger' is not defined"",""message"":""Analysis failed""}
+"

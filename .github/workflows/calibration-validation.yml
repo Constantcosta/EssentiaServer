@@ -1,0 +1,40 @@
+name: Calibration Validation
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install calibration dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-calibration.txt
+
+      - name: Enforce calibration guardrails
+        run: |
+          python3 tools/validate_calibration.py \
+            --dataset data/calibration/calibration_20251112_225553.parquet \
+            --tag ci \
+            --preview \
+            --skip-report \
+            --max-mae bpm=4.0 \
+            --max-mae danceability=0.12 \
+            --max-mae energy=0.15 \
+            --max-mae acousticness=0.12 \
+            --max-mae valence=0.15 \
+            --max-mae loudness=2.5 \
+            --drift-baseline data/calibration/mac_gui_calibration_20251112_221138.parquet \
+            --max-drift 0.6

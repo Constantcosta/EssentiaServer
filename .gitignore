@@ -7,6 +7,8 @@ venv/
 .venv/
 .env
 .env.*
+.numba_cache/
+backend/analysis/.numba_cache/
 *.log
 *.sqlite3
 
