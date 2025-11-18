@@ -27,10 +27,10 @@ _RUNNER_SCORE_MARGIN = 0.025
 _WINDOW_SUPPORT_RATIO = 0.65
 _MODE_BIAS_THRESHOLD = 0.08
 _MODE_BIAS_CONF_LIMIT = 0.5
-_WINDOW_SUPPORT_PROMOTION = 0.66  # Increased from 0.62 to require stronger mode consensus
+_WINDOW_SUPPORT_PROMOTION = 0.72  # Increased from 0.66 to 0.72 for preview clips (reduce fifth-related errors)
 _FINAL_SUPPORT_FLOOR = 0.5
 _WINDOW_SUPPORT_DELTA = 0.18
-_MODE_VOTE_THRESHOLD = 0.28  # Increased from 0.2 to reduce relative major/minor confusion
+_MODE_VOTE_THRESHOLD = 0.32  # Increased from 0.28 to 0.32 to reduce relative major/minor confusion
 _MODE_VOTE_CONF_GAIN = 0.3
 _CHROMA_PEAK_ENERGY_MARGIN = 0.075
 _CHROMA_PEAK_SUPPORT_RATIO = 0.55
@@ -40,6 +40,13 @@ _EDM_RELAXED_SCORE = 0.42
 _EDM_SUPPORT_RATIO = 0.45
 _DOMINANT_INTERVAL_STEPS = {5, 7}
 _DOMINANT_OVERRIDE_SCORE = 0.55
+_WINDOW_SUPPORT_PROMOTION_SHORT = 0.78
+# Fifth reconciliation thresholds for short clips (dominant/tonic ambiguity)
+_FIFTH_RECON_CHROMA_RATIO = 0.57
+_FIFTH_RECON_SCORE_EPS = 0.04
+_FIFTH_RUNNER_SCORE_EPS = 0.02
+_ESSENTIA_TONIC_OVERRIDE_SCORE = 0.55
+_ESSENTIA_TONIC_OVERRIDE_CONFIDENCE = 0.45
 _MODE_RESCUE_SCORE = 0.58
 
 _HAS_ESSENTIA = False
@@ -188,6 +195,18 @@ def _mode_bias_from_chroma(chroma_profile: np.ndarray, root_index: int) -> float
     minor_sixth = chroma_profile[(root_index + 8) % 12]
     bias = (major_third - minor_third) + 0.5 * (major_sixth - minor_sixth)
     return float(bias)
+
+
+def _triad_energy(chroma_profile: np.ndarray, root_index: int, mode: str) -> float:
+    """Sum chroma energy for the root, third, and fifth of the key."""
+    chroma_profile = np.array(chroma_profile, dtype=float)
+    if chroma_profile.size < 12:
+        return 0.0
+    root = int(root_index) % 12
+    mode_norm = _normalize_mode_label(mode)
+    third = (root + (4 if mode_norm == "Major" else 3)) % 12
+    fifth = (root + 7) % 12
+    return float(chroma_profile[root] + chroma_profile[third] + chroma_profile[fifth])
 
 
 def _sorted_candidates(score_entries: List[Dict[str, object]]) -> List[Dict[str, object]]:
