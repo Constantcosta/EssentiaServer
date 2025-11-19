@@ -45,8 +45,9 @@ enum MetricMatch {
 
 /// Comparison between analysis and Spotify reference
 struct TrackComparison: Identifiable {
-    var id: String { song + artist }
+    var id: String { "\(testType?.rawValue ?? "unknown")|\(song)|\(artist)" }
     
+    let testType: ABCDTestType?
     let song: String
     let artist: String
     
@@ -64,6 +65,46 @@ struct TrackComparison: Identifiable {
     
     var overallMatch: Bool {
         bpmMatch.isMatch && keyMatch.isMatch
+    }
+}
+
+// MARK: - Test C Expected Reference (aligned with analyze_test_c_accuracy.py)
+
+/// Expected BPM/key for a single Test C track.
+struct TestCExpectedTrack {
+    let bpm: Int
+    let key: String
+}
+
+/// Canonical expectations for Test C (12 preview clips), using the same
+/// targets as the Python `analyze_test_c_accuracy.py` script.
+struct TestCExpectedReference {
+    static let shared = TestCExpectedReference()
+    
+    private let expectations: [String: TestCExpectedTrack]
+    
+    private init() {
+        expectations = [
+            // Batch 1
+            "Prisoner (feat. Dua Lipa)": TestCExpectedTrack(bpm: 128, key: "D# Minor"),
+            "Forget You": TestCExpectedTrack(bpm: 127, key: "C"),
+            "! (The Song Formerly Known As)": TestCExpectedTrack(bpm: 115, key: "B"),
+            "1000x": TestCExpectedTrack(bpm: 112, key: "G# Major"),
+            "2 Become 1": TestCExpectedTrack(bpm: 144, key: "F# Major"),
+            "3AM": TestCExpectedTrack(bpm: 108, key: "G# Major"),
+            
+            // Batch 2
+            "4ever": TestCExpectedTrack(bpm: 144, key: "F Minor"),
+            "9 to 5": TestCExpectedTrack(bpm: 107, key: "F# Major"),
+            "A Thousand Miles": TestCExpectedTrack(bpm: 149, key: "F# Major"),
+            "A Thousand Years": TestCExpectedTrack(bpm: 132, key: "A# Major"),
+            "A Whole New World (End Title)": TestCExpectedTrack(bpm: 114, key: "A Major"),
+            "About Damn Time": TestCExpectedTrack(bpm: 111, key: "D# Minor"),
+        ]
+    }
+    
+    func expected(forSongTitle title: String) -> TestCExpectedTrack? {
+        expectations[title]
     }
 }
 
@@ -105,121 +146,142 @@ class ComparisonEngine {
     /// Compare musical keys with enharmonic equivalents
     static func compareKey(analyzed: String?, spotify: String?) -> MetricMatch {
         guard
-            let analyzed = analyzed?.trimmingCharacters(in: .whitespacesAndNewlines),
-            let spotify = spotify?.trimmingCharacters(in: .whitespacesAndNewlines),
-            let normalizedAnalyzed = normalizeKey(analyzed),
-            let normalizedSpotify = normalizeKey(spotify)
+            let analyzedRaw = analyzed?.trimmingCharacters(in: .whitespacesAndNewlines),
+            let spotifyRaw = spotify?.trimmingCharacters(in: .whitespacesAndNewlines),
+            let parsedAnalyzed = parseKey(analyzedRaw),
+            let parsedSpotify = parseKey(spotifyRaw)
         else {
             return .unavailable
         }
-        
-        // Direct comparison first
-        if normalizedAnalyzed == normalizedSpotify {
+
+        if parsedAnalyzed == parsedSpotify {
             return .match
         }
-        
-        // Check enharmonic equivalents (e.g., D# == Eb, G#/Ab == Ab)
-        if areEnharmonicEquivalents(normalizedAnalyzed, normalizedSpotify) {
-            return .match
-        }
-        
+
         return .mismatch(
-            expected: spotify,
-            actual: analyzed
+            expected: spotifyRaw,
+            actual: analyzedRaw
         )
     }
     
-    /// Normalize a key string into (note, mode). Returns nil if the input is empty.
-    private static func normalizeKey(_ key: String) -> (note: String, mode: String)? {
+    /// Parsed canonical representation of a key.
+    private struct ParsedKey: Equatable {
+        let pitchClass: Int   // 0–11
+        let mode: String      // "major" | "minor"
+    }
+    
+    /// Convert a key string into a canonical pitch class + mode, handling enharmonic spellings.
+    private static func parseKey(_ key: String) -> ParsedKey? {
         var cleaned = key.lowercased()
             .replacingOccurrences(of: "♯", with: "#")
             .replacingOccurrences(of: "♭", with: "b")
             .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
-        
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+
         guard !cleaned.isEmpty else { return nil }
-        
-        // Detect mode by suffix/keyword, not by presence of the letter "m"
+
         var mode = "major"
-        if cleaned.hasSuffix("m") {
-            cleaned.removeLast()
+        if cleaned.contains("minor") || cleaned.contains("min") || cleaned.hasSuffix("m") {
             mode = "minor"
         }
-        if cleaned.contains("minor") {
-            cleaned = cleaned.replacingOccurrences(of: "minor", with: "")
-            mode = "minor"
-        }
-        // Strip explicit "major"/"maj" noise
+
+        // Strip mode markers to isolate the tonic spelling
         cleaned = cleaned
+            .replacingOccurrences(of: "minor", with: "")
             .replacingOccurrences(of: "major", with: "")
             .replacingOccurrences(of: "maj", with: "")
-        
-        // Handle slash notation (e.g., "D#/Eb" or "G#/Ab") - take first part
-        if let slashIndex = cleaned.firstIndex(of: "/") {
-            cleaned = String(cleaned[..<slashIndex])
-        }
-        
-        cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+            .replacingOccurrences(of: "min", with: "")
+        if cleaned.hasSuffix("m") { cleaned.removeLast() }
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return nil }
-        
-        return (note: cleaned, mode: mode)
-    }
-    
-    /// Check if two normalized keys (note, mode) are enharmonic equivalents
-    private static func areEnharmonicEquivalents(
-        _ key1: (note: String, mode: String),
-        _ key2: (note: String, mode: String)
-    ) -> Bool {
-        guard key1.mode == key2.mode else { return false }
-        
-        // Normalize both notes to a canonical form for comparison
-        func normalizeNote(_ note: String) -> String {
-            let note = note.lowercased()
-            // Map all enharmonic equivalents to a canonical form (using sharps)
-            let canonicalMap: [String: String] = [
-                "c": "c", "b#": "c",
-                "c#": "c#", "db": "c#",
-                "d": "d",
-                "d#": "d#", "eb": "d#",
-                "e": "e", "fb": "e",
-                "f": "f", "e#": "f",
-                "f#": "f#", "gb": "f#",
-                "g": "g",
-                "g#": "g#", "ab": "g#",
-                "a": "a",
-                "a#": "a#", "bb": "a#",
-                "b": "b", "cb": "b"
-            ]
-            return canonicalMap[note] ?? note
+
+        // Drop any non-note/accidental/slash characters (e.g., metadata noise)
+        cleaned = cleaned.replacingOccurrences(
+            of: "[^a-g#/xb]+",
+            with: "",
+            options: .regularExpression
+        )
+        guard !cleaned.isEmpty else { return nil }
+
+        // Handle compound spellings like "D#/Eb" by trying each side until one parses.
+        for token in cleaned.split(separator: "/") {
+            if let pitch = pitchClass(for: String(token)) {
+                return ParsedKey(pitchClass: pitch, mode: mode)
+            }
         }
-        
-        let canonical1 = normalizeNote(key1.note)
-        let canonical2 = normalizeNote(key2.note)
-        
-        return canonical1 == canonical2
+        // Fallback: grab first note-like token (handles ellipses or other noise)
+        if let match = cleaned.range(of: "[a-gA-G][#bx]*", options: .regularExpression) {
+            let token = String(cleaned[match])
+            if let pitch = pitchClass(for: token) {
+                return ParsedKey(pitchClass: pitch, mode: mode)
+            }
+        }
+        return nil
+    }
+
+    /// Map a note token to its pitch class (supports double-sharps/flats and uppercase).
+    private static func pitchClass(for token: String) -> Int? {
+        let lowered = token.lowercased()
+        guard let first = lowered.first else { return nil }
+        let baseMap: [Character: Int] = [
+            "c": 0, "d": 2, "e": 4, "f": 5, "g": 7, "a": 9, "b": 11
+        ]
+        guard var pitch = baseMap[first] else { return nil }
+        for accidental in lowered.dropFirst() {
+            switch accidental {
+            case "#":
+                pitch += 1
+            case "b":
+                pitch -= 1
+            case "x":  // Double-sharp shorthand
+                pitch += 2
+            default:
+                return nil
+            }
+        }
+        let normalized = pitch % 12
+        return normalized >= 0 ? normalized : normalized + 12
     }
     
     /// Create a comparison for a single track
     static func compareTrack(
         analysis: AnalysisResult,
-        spotifyReference: SpotifyTrack?
+        spotifyReference: SpotifyTrack?,
+        testType: ABCDTestType? = nil
     ) -> TrackComparison {
+        // Start from raw Spotify reference values
+        var expectedBPM = spotifyReference?.bpm
+        var expectedKey = spotifyReference?.key
+        
+        // For Test C (12 preview clips), align expectations with the
+        // Python analysis script (analyze_test_c_accuracy.py), which
+        // uses curated tonic keys and BPMs instead of raw Spotify keys.
+        if testType == .testC {
+            if let override = TestCExpectedReference.shared.expected(forSongTitle: analysis.song) {
+                expectedBPM = override.bpm
+                expectedKey = override.key
+            }
+        }
+        
         let bpmMatch = compareBPM(
             analyzed: analysis.bpm,
-            spotify: spotifyReference?.bpm
+            spotify: expectedBPM
         )
         
         let keyMatch = compareKey(
             analyzed: analysis.key,
-            spotify: spotifyReference?.key
+            spotify: expectedKey
         )
         
         return TrackComparison(
+            testType: testType,
             song: analysis.song,
             artist: spotifyReference?.artist ?? analysis.artist,
             analyzedBPM: analysis.bpm,
             analyzedKey: analysis.key,
-            spotifyBPM: spotifyReference?.bpm,
-            spotifyKey: spotifyReference?.key,
+            spotifyBPM: expectedBPM,
+            spotifyKey: expectedKey,
             bpmMatch: bpmMatch,
             keyMatch: keyMatch
         )
@@ -227,7 +289,8 @@ class ComparisonEngine {
     
     /// Create comparisons for a batch of analysis results
     static func compareResults(
-        analyses: [AnalysisResult]
+        analyses: [AnalysisResult],
+        testType: ABCDTestType? = nil
     ) -> [TrackComparison] {
         let spotifyData = SpotifyReferenceData.shared
         
@@ -246,7 +309,8 @@ class ComparisonEngine {
             
             return compareTrack(
                 analysis: analysis,
-                spotifyReference: spotifyRef
+                spotifyReference: spotifyRef,
+                testType: testType
             )
         }
     }

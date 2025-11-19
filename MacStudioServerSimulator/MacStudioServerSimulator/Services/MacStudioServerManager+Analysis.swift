@@ -15,11 +15,11 @@ extension MacStudioServerManager {
         let artist: String
     }
     
-    static func loadAudioData(from fileURL: URL) throws -> Data {
+    nonisolated static func loadAudioData(from fileURL: URL) throws -> Data {
         try Data(contentsOf: fileURL)
     }
     
-    func inferredMetadata(for fileURL: URL) async -> AudioMetadata {
+    nonisolated func inferredMetadata(for fileURL: URL) async -> AudioMetadata {
         // Best-effort read of common metadata; fall back to filename.
         let asset = AVURLAsset(url: fileURL)
         var title = fileURL.deletingPathExtension().lastPathComponent
@@ -45,7 +45,7 @@ extension MacStudioServerManager {
         return AudioMetadata(title: title, artist: artist)
     }
     
-    func contentType(for fileURL: URL) -> String {
+    nonisolated func contentType(for fileURL: URL) -> String {
         if let type = UTType(filenameExtension: fileURL.pathExtension),
            let mime = type.preferredMIMEType {
             return mime
@@ -55,17 +55,30 @@ extension MacStudioServerManager {
 
 // MARK: - Audio Analysis
     
-    func analyzeAudioFile(
+    nonisolated func analyzeAudioFile(
         at fileURL: URL,
         skipChunkAnalysis: Bool = false,
         forceFreshAnalysis: Bool = false,
-        cacheNamespace: String? = nil
+        cacheNamespace: String? = nil,
+        requestTimeout: TimeInterval? = nil,
+        titleOverride: String? = nil,
+        artistOverride: String? = nil,
+        clientRequestId: String? = nil
     ) async throws -> AnalysisResult {
-        guard isServerRunning else {
+        // Ensure the analyzer is running. If it's offline, ask the manager
+        // to auto-start it so callers (Repertoire, Quick Analyze, calibration)
+        // don't have to manage server lifecycle manually.
+        var serverRunning = await MainActor.run { isServerRunning }
+        if !serverRunning {
+            await autoStartServerIfNeeded(autoManageEnabled: true, overrideUserStop: true)
+            serverRunning = await MainActor.run { isServerRunning }
+        }
+        guard serverRunning else {
             throw AudioAnalysisError.serverOffline
         }
         
-        guard let requestURL = URL(string: "\(baseURL)/analyze_data") else {
+        let baseURLString = await MainActor.run { baseURL }
+        guard let requestURL = URL(string: "\(baseURLString)/analyze_data") else {
             throw URLError(.badURL)
         }
         
@@ -83,14 +96,27 @@ extension MacStudioServerManager {
         var request = URLRequest(url: requestURL)
         request.httpMethod = "POST"
         request.httpBody = fileData
-        request.timeoutInterval = 900  // 15 minutes for long songs
+        // Use a generous default for full tracks, but allow callers
+        // (e.g. 30s previews in the Repertoire tab) to specify a
+        // shorter per-request timeout.
+        request.timeoutInterval = requestTimeout ?? 900  // seconds
         request.cachePolicy = .reloadIgnoringLocalCacheData
         
-        let metadata = await inferredMetadata(for: fileURL)
+        let metadata: AudioMetadata
+        if let titleOverride, let artistOverride {
+            metadata = AudioMetadata(title: titleOverride, artist: artistOverride)
+        } else {
+            metadata = await inferredMetadata(for: fileURL)
+        }
+        let apiKeyValue = await MainActor.run { apiKey }
+        
         request.setValue(metadata.title, forHTTPHeaderField: "X-Song-Title")
         request.setValue(metadata.artist, forHTTPHeaderField: "X-Song-Artist")
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        request.setValue(apiKeyValue, forHTTPHeaderField: "X-API-Key")
         request.setValue(contentType(for: fileURL), forHTTPHeaderField: "Content-Type")
+        if let clientRequestId, !clientRequestId.isEmpty {
+            request.setValue(clientRequestId, forHTTPHeaderField: "X-Client-Request-Id")
+        }
         if skipChunkAnalysis {
             request.setValue("1", forHTTPHeaderField: "X-Skip-Chunk-Analysis")
         }
@@ -101,6 +127,12 @@ extension MacStudioServerManager {
             request.setValue(cacheNamespace, forHTTPHeaderField: "X-Cache-Namespace")
         }
         
+        // Perform the actual network call - now truly concurrent!
+        return try await performNetworkRequest(request)
+    }
+    
+    // This helper runs off the main actor, allowing true concurrent network requests
+    nonisolated private func performNetworkRequest(_ request: URLRequest) async throws -> AnalysisResult {
         let (data, response) = try await URLSession.shared.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {

@@ -193,7 +193,7 @@ enum AudioAnalysisError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .serverOffline:
-            return "Start the analysis server before dropping audio."
+            return "The analyzer server is offline. Start it from the Servers view or run an analysis to launch it automatically, then try again."
         case .emptyFile:
             return "That file appears to be empty."
         case let .serverError(status, message):

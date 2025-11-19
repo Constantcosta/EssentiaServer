@@ -31,6 +31,8 @@ else:
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import logging
+import atexit
+import signal
 from datetime import datetime
 import secrets
 from functools import wraps
@@ -225,6 +227,27 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+def _log_unhandled(exc_type, exc, tb):
+    # Catch any otherwise-unlogged fatal exception before the process dies.
+    logger.exception("💥 Unhandled exception reached top-level", exc_info=(exc_type, exc, tb))
+
+sys.excepthook = _log_unhandled
+
+def _handle_signal(signum, frame):
+    logger.warning("⛔️ Received signal %s – shutting down analyze_server", signum)
+    sys.exit(0)
+
+for _sig in (signal.SIGTERM, signal.SIGINT):
+    try:
+        signal.signal(_sig, _handle_signal)
+    except Exception:
+        # Not fatal if we cannot attach handler (e.g., on some platforms).
+        pass
+
+@atexit.register
+def _log_exit():
+    logger.info("🛑 analyze_server process exiting")
+
 logger.info(f"🚀 Server build {SERVER_BUILD_SIGNATURE} (hann shim enabled: {SCIPY_HANN_PATCHED})")
 if not ENABLE_TONAL_EXTRACTOR:
     logger.info("🎚️ Essentia TonalExtractor disabled (set ENABLE_TONAL_EXTRACTOR=true to re-enable tonal strength).")

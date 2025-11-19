@@ -16,9 +16,11 @@ struct TestComparisonView: View {
     private var allComparisons: [TrackComparison] {
         var comparisons: [TrackComparison] = []
         
-        for (_, result) in results {
+        for test in ABCDTestType.allCases {
+            guard let result = results[test] else { continue }
             let comparisonResults = ComparisonEngine.compareResults(
-                analyses: result.analysisResults
+                analyses: result.analysisResults,
+                testType: test
             )
             comparisons.append(contentsOf: comparisonResults)
         }
@@ -34,9 +36,10 @@ struct TestComparisonView: View {
     
     private var comparisonExportText: String {
         guard !allComparisons.isEmpty else { return "" }
-        var lines = ["Song\tArtist\tOur BPM\tSpotify BPM\tOur Key\tSpotify Key\tStatus"]
+        var lines = ["Test\tSong\tArtist\tOur BPM\tSpotify BPM\tOur Key\tSpotify Key\tStatus"]
         for comparison in allComparisons {
             // Clean field values - remove tabs and newlines that could corrupt TSV format
+            let testLabel = (comparison.testType?.name ?? "—").replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
             let song = comparison.song.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
             let artist = comparison.artist.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
             let oursBPM = comparison.analyzedBPM.map(String.init) ?? "—"
@@ -44,7 +47,7 @@ struct TestComparisonView: View {
             let oursKey = (comparison.analyzedKey ?? "—").replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
             let spotifyKey = (comparison.spotifyKey ?? "—").replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
             let status = comparison.overallMatch ? "Match" : "Diff"
-            lines.append("\(song)\t\(artist)\t\(oursBPM)\t\(spotifyBPM)\t\(oursKey)\t\(spotifyKey)\t\(status)")
+            lines.append("\(testLabel)\t\(song)\t\(artist)\t\(oursBPM)\t\(spotifyBPM)\t\(oursKey)\t\(spotifyKey)\t\(status)")
         }
         return lines.joined(separator: "\n")
     }
@@ -130,43 +133,51 @@ struct TestComparisonView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 40)
-            } else {
-                // Comparison table
-                VStack(spacing: 0) {
-                    // Header row - COMPACT VERSION
-                    HStack(spacing: 8) {
-                        Text("Song / Artist")
-                            .frame(width: 160, alignment: .leading)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                        
-                        Divider()
-                            .frame(height: 12)
-                        
-                        Text("BPM (Ours → Spotify)")
-                            .frame(width: 100)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                        
-                        Divider()
-                            .frame(height: 12)
-                        
-                        Text("Key (Ours → Spotify)")
-                            .frame(width: 80)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                        
-                        Divider()
-                            .frame(height: 12)
-                        
-                        Text("Status")
-                            .frame(width: 60, alignment: .center)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                    }
-                    .frame(height: 20)
-                    .padding(.vertical, 2)
-                    .padding(.horizontal, 8)
+                } else {
+                    // Comparison table
+                    VStack(spacing: 0) {
+                        // Header row - COMPACT VERSION
+                        HStack(spacing: 8) {
+                            Text("Test")
+                                .frame(width: 70, alignment: .leading)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                            
+                            Divider()
+                                .frame(height: 12)
+                            
+                            Text("Song / Artist")
+                                .frame(width: 160, alignment: .leading)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                            
+                            Divider()
+                                .frame(height: 12)
+                            
+                            Text("BPM (Ours → Spotify)")
+                                .frame(width: 100)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                            
+                            Divider()
+                                .frame(height: 12)
+                            
+                            Text("Key (Ours → Spotify)")
+                                .frame(width: 80)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                            
+                            Divider()
+                                .frame(height: 12)
+                            
+                            Text("Status")
+                                .frame(width: 60, alignment: .center)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        }
+                        .frame(height: 20)
+                        .padding(.vertical, 2)
+                        .padding(.horizontal, 8)
                     .background(Color.secondary.opacity(0.1))
                     
                     Divider()
@@ -316,7 +327,8 @@ struct DetailedComparisonWindow: View {
         
         return filtered.filter {
             $0.song.localizedCaseInsensitiveContains(searchText) ||
-            $0.artist.localizedCaseInsensitiveContains(searchText)
+            $0.artist.localizedCaseInsensitiveContains(searchText) ||
+            ($0.testType?.name.localizedCaseInsensitiveContains(searchText) ?? false)
         }
     }
     
@@ -382,11 +394,21 @@ struct DetailedComparisonWindow: View {
             
             // Table Header - COMPACT with flexible columns
             HStack(spacing: 0) {
-                Text("Song / Artist")
-                    .frame(width: 300, alignment: .leading)
+                Text("Test")
+                    .frame(width: 90, alignment: .leading)
                     .font(.caption2)
                     .fontWeight(.semibold)
                     .padding(.leading, 12)
+                
+                Divider()
+                    .frame(height: 12)
+                    .padding(.horizontal, 8)
+                
+                Text("Song / Artist")
+                    .frame(width: 280, alignment: .leading)
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .padding(.leading, 4)
                 
                 Divider()
                     .frame(height: 12)
@@ -454,6 +476,14 @@ struct DetailedComparisonRow: View {
     
     var body: some View {
         HStack(spacing: 0) {
+            // Test label
+            TestBadge(testType: comparison.testType)
+                .frame(width: 90, alignment: .leading)
+                .padding(.leading, 12)
+            
+            Divider()
+                .padding(.horizontal, 8)
+            
             // Song/Artist - Fixed width for visibility
             VStack(alignment: .leading, spacing: 2) {
                 Text(comparison.song)
@@ -464,8 +494,8 @@ struct DetailedComparisonRow: View {
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }
-            .frame(width: 300, alignment: .leading)
-            .padding(.leading, 12)
+            .frame(width: 280, alignment: .leading)
+            .padding(.leading, 4)
             
             Divider()
                 .padding(.horizontal, 8)
@@ -558,7 +588,7 @@ struct DetailedComparisonRow: View {
             }
             Divider()
             Button("Copy Row") {
-                let row = "\(comparison.song)\t\(comparison.artist)\t\(comparison.analyzedBPM ?? 0)\t\(comparison.spotifyBPM ?? 0)\t\(comparison.analyzedKey ?? "")\t\(comparison.spotifyKey ?? "")"
+                let row = "\(comparison.testType?.name ?? "—")\t\(comparison.song)\t\(comparison.artist)\t\(comparison.analyzedBPM ?? 0)\t\(comparison.spotifyBPM ?? 0)\t\(comparison.analyzedKey ?? "")\t\(comparison.spotifyKey ?? "")"
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(row, forType: .string)
             }
@@ -573,6 +603,11 @@ struct ComparisonRow: View {
     
     var body: some View {
         HStack(spacing: 8) {
+            TestBadge(testType: comparison.testType)
+                .frame(width: 70, alignment: .leading)
+            
+            Divider()
+            
             // Song
             VStack(alignment: .leading, spacing: 1) {
                 Text(comparison.song)
@@ -640,6 +675,23 @@ struct ComparisonRow: View {
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
         .background(comparison.overallMatch ? Color.green.opacity(0.03) : Color.red.opacity(0.03))
+    }
+}
+
+struct TestBadge: View {
+    let testType: ABCDTestType?
+    
+    var body: some View {
+        Text(testType?.name ?? "—")
+            .font(.caption2)
+            .fontWeight(.semibold)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.accentColor.opacity(0.12))
+            .foregroundColor(.accentColor)
+            .cornerRadius(6)
+            .lineLimit(1)
+            .truncationMode(.tail)
     }
 }
 

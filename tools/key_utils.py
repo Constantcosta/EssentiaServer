@@ -6,23 +6,6 @@ from typing import Optional, Tuple
 
 NOTE_NAMES_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
-NOTE_ALIAS_MAP = {
-    "cb": "B",
-    "b#": "C",
-    "db": "C#",
-    "eb": "D#",
-    "fb": "E",
-    "e#": "F",
-    "gb": "F#",
-    "ab": "G#",
-    "bb": "A#",
-    "c#": "C#",
-    "d#": "D#",
-    "f#": "F#",
-    "g#": "G#",
-    "a#": "A#",
-}
-
 MODE_ALIASES = {
     "maj": "major",
     "major": "major",
@@ -39,33 +22,82 @@ def _normalize_note_text(text: str) -> str:
     return text
 
 
+def _pitch_class_from_token(token: str) -> Optional[int]:
+    """Convert a note token (e.g., c, db, d##, cb) into a pitch class 0–11."""
+    if not token:
+        return None
+    token = token.strip().lower()
+    if not token:
+        return None
+    base_map = {"c": 0, "d": 2, "e": 4, "f": 5, "g": 7, "a": 9, "b": 11}
+    base = token[0]
+    if base not in base_map:
+        return None
+    pitch = base_map[base]
+    for accidental in token[1:]:
+        if accidental == "#":
+            pitch += 1
+        elif accidental == "b":
+            pitch -= 1
+        elif accidental == "x":  # double-sharp shorthand
+            pitch += 2
+        else:
+            return None
+    return pitch % 12
+
+
 def normalize_key_label(label: Optional[str]) -> Optional[Tuple[int, str]]:
     """Convert an arbitrary key label to (root_index, mode)."""
     if not label:
         return None
-    text = _normalize_note_text(str(label).strip().lower())
+    text = _normalize_note_text(str(label))
+    text = text.replace("-", "").replace("_", "")
+    text = text.strip().lower()
     if not text:
         return None
+
+    # Detect mode before stripping mode tokens
     mode = "major"
-    for alias, canonical in MODE_ALIASES.items():
-        if alias in text.split():
-            mode = canonical
-            text = text.replace(alias, "")
-    text = text.replace("major", "").replace("minor", "").strip()
+    raw_tokens = text.replace("/", " ").split()
+    if any(tok in MODE_ALIASES for tok in raw_tokens):
+        for tok in raw_tokens:
+            if tok in MODE_ALIASES:
+                mode = MODE_ALIASES[tok]
+    elif text.endswith("m"):
+        mode = "minor"
+
+    # Remove mode markers to leave only the tonic spelling
+    for alias in sorted(MODE_ALIASES.keys(), key=len, reverse=True):
+        text = text.replace(alias, "")
+    text = text.replace("major", "").replace("minor", "")
+    if text.endswith("m"):
+        text = text[:-1]
+    text = text.strip()
     if not text:
         return None
-    root_token = text.split()[0]
-    if "/" in root_token:
-        root_token = root_token.split("/", 1)[0]
-    root_token = root_token.strip()
-    if not root_token:
+
+    # Drop any non-note/accidental/slash characters introduced by metadata
+    import re  # Local import to avoid module cost for callers that don't need regex
+    text = re.sub(r"[^a-g#/xb]+", "", text, flags=re.IGNORECASE)
+    if not text:
         return None
-    root_token = NOTE_ALIAS_MAP.get(root_token, root_token)
-    try:
-        root_index = NOTE_NAMES_SHARP.index(root_token.upper())
-    except ValueError:
-        return None
-    return root_index, mode
+
+    # Support slash tokens (use the first parsable tonic)
+    for root_token in text.split("/"):
+        root_token = root_token.strip()
+        if not root_token:
+            continue
+        root_index = _pitch_class_from_token(root_token)
+        if root_index is not None:
+            return root_index, mode
+
+    # Fallback: grab first note-like token (handles ellipses or other noise)
+    note_tokens = re.findall(r"[a-g][#bx]*", text)
+    if note_tokens:
+        root_index = _pitch_class_from_token(note_tokens[0])
+        if root_index is not None:
+            return root_index, mode
+    return None
 
 
 def canonical_key_id(root_index: int, mode: str) -> str:
@@ -108,17 +140,21 @@ def keys_match_fuzzy(key1: Optional[str], key2: Optional[str]) -> Tuple[bool, st
     
     parsed1 = normalize_key_label(key1)
     parsed2 = normalize_key_label(key2)
-    
+
     if not parsed1 or not parsed2:
         return (False, "unparseable key")
-    
+
     root1, mode1 = parsed1
     root2, mode2 = parsed2
-    
-    # Exact match (same root and mode)
+
     if root1 == root2 and mode1 == mode2:
-        return (True, "exact")
-    
+        # Check if spelling differed for a clearer reason
+        canonical1 = _normalize_note_text(str(key1)).strip().lower()
+        canonical2 = _normalize_note_text(str(key2)).strip().lower()
+        if canonical1 == canonical2:
+            return (True, "exact")
+        return (True, "enharmonic")
+
     return (False, "different")
 
 

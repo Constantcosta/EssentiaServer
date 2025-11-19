@@ -11,10 +11,7 @@ import AppKit
 struct ServerManagementView: View {
     @EnvironmentObject var manager: MacStudioServerManager
     @State private var selectedTab = 0
-    @State private var searchQuery = ""
-    @State private var showingClearAlert = false
     @StateObject private var logStore = LogStore()
-    @AppStorage("autoManageLocalServer") private var autoManageLocalServer = true
     
     var body: some View {
         VStack(spacing: 0) {
@@ -23,65 +20,33 @@ struct ServerManagementView: View {
             Divider()
             
             Picker("View", selection: $selectedTab) {
-                Label("Overview", systemImage: "chart.bar.fill").tag(0)
-                Label("Cache", systemImage: "tray.full.fill").tag(1)
-                Label("Calibration", systemImage: "target").tag(2)
-                Label("Tests", systemImage: "checklist").tag(3)
-                Label("Logs", systemImage: "doc.text.fill").tag(4)
+                Label("Tests", systemImage: "checklist").tag(0)
+                Label("Logs", systemImage: "doc.text.fill").tag(1)
             }
             .pickerStyle(.segmented)
             .padding()
             
-            // Show all tabs but only make the selected one visible
-            // This preserves scroll positions without TabView complexity
-            // Using .equatable() and lazy loading for performance
+            // Keep both tabs alive and only toggle visibility.
+            // This preserves in-progress work (e.g. Repertoire analysis)
+            // and scroll positions while you switch between Tests and Logs.
             ZStack {
-                if selectedTab == 0 {
-                    OverviewTab(manager: manager)
-                        .id("overview")
-                        .transition(.opacity)
-                }
+                TestsTab(manager: manager)
+                    .opacity(selectedTab == 0 ? 1 : 0)
+                    .allowsHitTesting(selectedTab == 0)
+                    .id("tests")
                 
-                if selectedTab == 1 {
-                    CacheTab(manager: manager, searchQuery: $searchQuery, showingClearAlert: $showingClearAlert)
-                        .id("cache")
-                        .transition(.opacity)
-                }
-                
-                if selectedTab == 2 {
-                    CalibrationTab(manager: manager)
-                        .id("calibration")
-                        .transition(.opacity)
-                }
-                
-                if selectedTab == 3 {
-                    TestsTab(manager: manager)
-                        .id("tests")
-                        .transition(.opacity)
-                }
-                
-                if selectedTab == 4 {
-                    LogsTab(logStore: logStore)
-                        .id("logs")
-                        .transition(.opacity)
-                }
+                LogsTab(logStore: logStore)
+                    .opacity(selectedTab == 1 ? 1 : 0)
+                    .allowsHitTesting(selectedTab == 1)
+                    .id("logs")
             }
             .animation(.easeInOut(duration: 0.15), value: selectedTab)
         }
         .frame(minWidth: 800, minHeight: 600)
         .task {
-            await manager.autoStartServerIfNeeded(autoManageEnabled: autoManageLocalServer)
+            await manager.checkServerStatus()
             if manager.isServerRunning {
                 await manager.fetchServerStats()
-            }
-        }
-        .onChange(of: autoManageLocalServer) { _, enabled in
-            if enabled {
-                Task {
-                    await manager.autoStartServerIfNeeded(autoManageEnabled: true, overrideUserStop: true)
-                }
-            } else {
-                manager.recordAutoManageDisabled()
             }
         }
     }
@@ -91,8 +56,6 @@ struct ServerManagementView: View {
 
 struct ServerStatusHeader: View {
     @ObservedObject var manager: MacStudioServerManager
-    @AppStorage("autoManageLocalServer") private var autoManageLocalServer = true
-    @State private var showingAutoManageInfo = false
     
     var body: some View {
         HStack(spacing: 16) {
@@ -118,61 +81,20 @@ struct ServerStatusHeader: View {
                     .foregroundColor(.red)
                     .lineLimit(1)
             }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(isOn: $autoManageLocalServer) {
-                    Text("Auto-manage server")
-                        .font(.caption)
-                }
-                .toggleStyle(.switch)
-                .help("Automatically launch the bundled Python analyzer as soon as the Mac app opens.")
-                
-                Button {
-                    showingAutoManageInfo = true
-                } label: {
-                    Label("How auto-manage works", systemImage: "info.circle")
-                        .font(.caption2)
-                }
-                .buttonStyle(.link)
-                
-                if let banner = manager.autoManageBanner {
-                    AutoManageStatusView(banner: banner)
-                }
-            }
-            .frame(maxWidth: 240, alignment: .leading)
             
             HStack(spacing: 8) {
-                if manager.isServerRunning {
-                    Button {
-                        Task { await manager.fetchServerStats() }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                Button {
+                    Task {
+                        await manager.checkServerStatus()
+                        if manager.isServerRunning {
+                            await manager.fetchServerStats(silently: true)
+                        }
                     }
-                    .disabled(manager.isLoading)
-                    
-                    Button {
-                        Task { await manager.restartServer() }
-                    } label: {
-                        Label("Restart", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    .disabled(manager.isLoading)
-                    
-                    Button {
-                        Task { await manager.stopServer() }
-                    } label: {
-                        Label("Stop", systemImage: "stop.fill")
-                    }
-                    .tint(.red)
-                    .disabled(manager.isLoading)
-                } else {
-                    Button {
-                        Task { await manager.startServer() }
-                    } label: {
-                        Label("Start Server", systemImage: "play.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(manager.isLoading)
+                } label: {
+                    Label("Check Status", systemImage: "arrow.clockwise")
                 }
+                .buttonStyle(.bordered)
+                .disabled(manager.isLoading)
                 
                 if manager.isLoading {
                     ProgressView()
@@ -182,11 +104,5 @@ struct ServerStatusHeader: View {
         }
         .padding()
         .background(Color(nsColor: .controlBackgroundColor))
-        .sheet(isPresented: $showingAutoManageInfo) {
-            AutoManageInfoSheet(
-                manager: manager,
-                isEnabled: $autoManageLocalServer
-            )
-        }
     }
 }

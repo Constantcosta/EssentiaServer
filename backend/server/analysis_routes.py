@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Callable, Optional
 
 import requests
@@ -175,16 +176,30 @@ def register_analysis_routes(
     @app.route("/analyze_data", methods=["POST"])
     @require_api_key
     def analyze_data():
+        start_ts = time.perf_counter()
+        # Simple request id so we can correlate start/end and failures in logs.
+        request_id = f"req-{int(start_ts * 1000) % 1_000_000:06d}"
+        title = request.headers.get("X-Song-Title", "Unknown")
+        artist = request.headers.get("X-Song-Artist", "Unknown")
+        client_request_id = request.headers.get("X-Client-Request-Id", "-")
         try:
             audio_data = request.get_data()
             if not audio_data:
                 return jsonify({"error": "No audio data provided"}), 400
-            title = request.headers.get("X-Song-Title", "Unknown")
-            artist = request.headers.get("X-Song-Artist", "Unknown")
             skip_chunk = _should_skip_chunk_analysis()
             force_reanalyze = _should_force_reanalyze()
             cache_namespace = _resolve_cache_namespace()
-            logger.info("📨 Analyzing direct upload '%s' by %s", title, artist)
+            logger.info(
+                "▶️ [%s] START analyze_data title='%s' artist='%s' bytes=%d skip_chunk=%s force_reanalyze=%s namespace=%s client_id=%s",
+                request_id,
+                title,
+                artist,
+                len(audio_data),
+                skip_chunk,
+                force_reanalyze,
+                cache_namespace,
+                client_request_id,
+            )
             cache_key = f"audiodata://{artist}/{title}"
             if skip_chunk:
                 cache_key = f"{cache_key}::chunk=skip"
@@ -204,6 +219,9 @@ def register_analysis_routes(
             load_kwargs = {"sr": None}
             if max_analysis_seconds:
                 load_kwargs["duration"] = max_analysis_seconds
+            # Direct uploads now leverage the shared process pool for throughput.
+            # get_analysis_executor() will refuse nested pools, so this remains safe
+            # inside worker contexts while giving us multi-process speed for the GUI.
             result = process_audio_bytes(
                 audio_data,
                 title,
@@ -213,7 +231,7 @@ def register_analysis_routes(
                 use_tempfile=True,
                 temp_suffix=".m4a",
                 max_workers=analysis_workers,
-                timeout=120,  # 2 minute timeout per song
+                timeout=180,  # Allow slow songs to finish under load; GUI still has per-request timeout
             )
             save_to_cache(
                 cache_key,
@@ -224,16 +242,43 @@ def register_analysis_routes(
                 namespace=cache_namespace,
             )
             update_stats(cache_hit=False)
+            elapsed = time.perf_counter() - start_ts
+            logger.info(
+                "✅ [%s] DONE analyze_data title='%s' artist='%s' dur=%.2fs cache_namespace=%s client_id=%s",
+                request_id,
+                title,
+                artist,
+                elapsed,
+                cache_namespace,
+                client_request_id,
+            )
             return jsonify(result)
         except TimeoutError as exc:
-            logger.error("⏱️ Analysis timed out for direct upload '%s' by %s", title, artist)
+            elapsed = time.perf_counter() - start_ts
+            logger.error(
+                "⏱️ [%s] TIMEOUT analyze_data title='%s' artist='%s' dur=%.2fs client_id=%s: %s",
+                request_id,
+                title,
+                artist,
+                elapsed,
+                client_request_id,
+                exc,
+            )
             return jsonify({
                 "error": "timeout",
                 "message": str(exc),
                 "hint": "Song analysis took longer than 2 minutes. This may indicate the server is overloaded or the song has processing issues."
             }), 504
         except Exception as exc:
-            logger.exception("❌ Error analyzing direct upload")
+            elapsed = time.perf_counter() - start_ts
+            logger.exception(
+                "❌ [%s] ERROR analyze_data title='%s' artist='%s' dur=%.2fs client_id=%s",
+                request_id,
+                title,
+                artist,
+                elapsed,
+                client_request_id,
+            )
             response = {
                 "error": str(exc),
                 "message": "Analysis failed",
@@ -242,6 +287,17 @@ def register_analysis_routes(
             if hint:
                 response["hint"] = hint
             return jsonify(response), 500
+        finally:
+            # Helps detect hung requests: we should always see DONE/ERROR/TIMEOUT for each START.
+            # If not, the process likely crashed mid-request.
+            if "elapsed" not in locals():
+                elapsed = time.perf_counter() - start_ts
+            logger.debug(
+                "ℹ️ [%s] analyze_data finished with status code already set (elapsed=%.2fs, client_id=%s)",
+                request_id,
+                elapsed,
+                client_request_id,
+            )
 
     @app.route("/analyze_batch", methods=["POST"])
     @require_api_key

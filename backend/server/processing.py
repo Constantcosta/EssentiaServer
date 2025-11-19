@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import concurrent.futures
 from concurrent.futures import ProcessPoolExecutor
 from io import BytesIO
 import logging
@@ -243,11 +244,40 @@ def process_audio_bytes(
             # Add timeout protection - if analysis takes longer than timeout, raise exception
             future = executor.submit(_analysis_worker_job, payload)
             return future.result(timeout=timeout)
-        except TimeoutError:
+        except concurrent.futures.TimeoutError:
             LOGGER.error("❌ Analysis timed out after %ds for '%s' - %s", timeout, title, artist)
             raise TimeoutError(f"Analysis timed out after {timeout}s for '{title}' by {artist}")
         except Exception as exc:
             LOGGER.exception("⚠️ Process pool analysis failed, falling back inline: %s", exc)
+
+    # Inline path (used for direct uploads like /analyze_data). To avoid
+    # requests hanging forever when the underlying analysis stack blocks, wrap
+    # the inline call in a one-shot ThreadPoolExecutor and enforce the same
+    # timeout that the process-pool path uses.
+    if timeout and timeout > 0:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as thread_pool:
+            future = thread_pool.submit(
+                _run_analysis_inline,
+                audio_bytes,
+                title,
+                artist,
+                load_kwargs,
+                chunk_enabled,
+                use_tempfile,
+                temp_suffix,
+            )
+            try:
+                return future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                LOGGER.error(
+                    "❌ Inline analysis timed out after %ds for '%s' - %s",
+                    timeout,
+                    title,
+                    artist,
+                )
+                raise TimeoutError(f"Analysis timed out after {timeout}s for '{title}' by {artist}")
+
+    # Fallback with no extra timeout guard (timeout<=0).
     return _run_analysis_inline(
         audio_bytes,
         title,

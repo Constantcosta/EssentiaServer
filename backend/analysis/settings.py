@@ -97,8 +97,8 @@ def get_adaptive_analysis_params(signal_duration: float) -> dict:
             'key_window': min(signal_duration / 5.0, 6.0),     # Aim for ~5 windows minimum
             'key_window_hop': min(signal_duration / 10.0, 3.0), # Overlap for smoother consensus
             'confidence_threshold': 0.60,  # Lower threshold for less data
-            'use_onset_validation': False,  # Skip complex onset-based validations
-            'use_window_consensus': False,  # Trust direct chroma detection more
+            'use_onset_validation': False,  # Onset validation unreliable for 30s clips - trust alias scoring
+            'use_window_consensus': True,   # Enable window consensus with stricter thresholds in code
             'use_extended_alias': False,    # Skip extended BPM alias corrections
             'intermediate_correction_threshold': 1.50,  # Higher threshold = less aggressive
         }

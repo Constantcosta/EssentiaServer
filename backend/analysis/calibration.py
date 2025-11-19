@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from backend.analysis import settings
 from backend.analysis.utils import clamp_to_unit
 from tools.key_utils import (
     canonical_key_id,
@@ -124,9 +125,59 @@ def apply_calibration_layer(result: Dict[str, object]) -> Dict[str, object]:
     if not CALIBRATION_RULES:
         return result
     applied_strings = []
+    
+    signal_duration = float(result.get("signal_duration", 0.0) or 0.0)
+    is_short_clip = signal_duration < settings.SHORT_CLIP_THRESHOLD
+
+    # Get BPM confidence for smart calibration decisions
+    bpm_confidence = clamp_to_unit(result.get("bpm_confidence", 0.0))
+    raw_bpm = result.get("bpm")
+    
     for feature_name, field_name in CALIBRATED_RESULT_FIELDS.items():
         if field_name not in result:
             continue
+        # For BPM: apply calibration but cap maximum change to ±10 BPM
+        # This prevents calibration from causing octave-level errors
+        # while still allowing fine-tuning adjustments
+        if feature_name == "bpm" and raw_bpm is not None:
+            try:
+                raw_bpm_float = float(raw_bpm)
+            except (TypeError, ValueError):
+                raw_bpm_float = None
+
+            # For short previews: keep tempos in the 138-152 BPM sweet spot untouched
+            if is_short_clip and raw_bpm_float is not None:
+                in_sweet_spot = 138.0 <= raw_bpm_float <= 152.0
+                if in_sweet_spot:
+                    LOGGER.info(
+                        "⏭️  Skipping BPM calibration for short clip (%.1fs) in sweet spot: raw BPM %.1f (conf=%.2f)",
+                        signal_duration,
+                        raw_bpm_float,
+                        bpm_confidence,
+                    )
+                    continue
+                if raw_bpm_float >= 145.0:
+                    LOGGER.info(
+                        "⏭️  Skipping BPM calibration for short clip (%.1fs) high tempo %.1f (conf=%.2f)",
+                        signal_duration,
+                        raw_bpm_float,
+                        bpm_confidence,
+                    )
+                    continue
+
+            try:
+                calibrated_value, changed = _calibrate_value(feature_name, result[field_name])
+                if changed and raw_bpm_float is not None:
+                    bpm_change = abs(calibrated_value - raw_bpm_float)
+                    if bpm_change > 10.0:
+                        LOGGER.info(
+                            f"⚠️  Capping BPM calibration: {raw_bpm_float:.1f}→{calibrated_value:.1f} "
+                            f"would change by {bpm_change:.1f} BPM (max ±10)"
+                        )
+                        continue  # Skip this calibration
+            except (TypeError, ValueError):
+                pass
+        
         calibrated_value, changed = _calibrate_value(feature_name, result[field_name])
         if not changed:
             continue
@@ -464,6 +515,18 @@ def apply_bpm_calibration(result: Dict[str, object]) -> Dict[str, object]:
     energy = result.get("energy")
     signal_duration = result.get("signal_duration", 0.0)
     confidence = result.get("bpm_confidence", 0.0)
+    
+    try:
+        duration_float = float(signal_duration)
+    except (TypeError, ValueError):
+        duration_float = 0.0
+
+    if duration_float < settings.SHORT_CLIP_THRESHOLD:
+        LOGGER.info(
+            "⏭️  Skipping BPM calibration rules for short clip (%.1fs)",
+            duration_float,
+        )
+        return result
     
     if bpm is None or energy is None:
         return result

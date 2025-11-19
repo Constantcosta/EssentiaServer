@@ -116,9 +116,9 @@ def _score_tempo_alias_candidates(
         plp_similarity = _tempo_similarity(bpm_value, plp_bpm) if plp_bpm > 0 else 0.0
         multi_source_bonus = min(len(entry.get("sources", [])) * 0.05, 0.15)
 
-        if 80 <= bpm_value <= 140:
+        if 80 <= bpm_value <= 145:
             octave_preference = 0.15
-        elif 40 <= bpm_value < 80 or 140 < bpm_value <= 180:
+        elif 40 <= bpm_value < 80 or 145 < bpm_value <= 180:
             octave_preference = 0.05
         else:
             octave_preference = 0.0
@@ -217,18 +217,36 @@ def _validate_octave_with_onset_energy(
         test_bpms.append(double_bpm)
 
     best_bpm = bpm
-    best_separation = -1.0
+    best_separation = _compute_onset_energy_separation(bpm, onset_env, sr, hop_length)
+    if best_separation is None:
+        best_separation = 0.0
+    
+    # Apply octave preference priors per research doc §3.4.2
+    # Favor 80-140 BPM (sweet spot for pop/rock/EDM)
+    # Strong boost to overcome noisy onset separation in short clips
+    def _octave_preference_boost(test_bpm: float) -> float:
+        if 80 <= test_bpm <= 140:
+            return 1.40  # +40% boost for sweet spot (strong preference)
+        elif 40 <= test_bpm < 80 or 140 < test_bpm <= 180:
+            return 1.10  # +10% boost for reasonable range
+        return 0.90  # -10% penalty outside normal range
+    
+    best_score = best_separation * _octave_preference_boost(bpm)
+    
     for test_bpm in test_bpms:
+        if abs(test_bpm - bpm) < 0.1:
+            continue
         separation = _compute_onset_energy_separation(test_bpm, onset_env, sr, hop_length)
         if separation is None:
             continue
-        if separation > best_separation:
+        # Apply preference boost and require 10% improvement
+        score = separation * _octave_preference_boost(test_bpm)
+        if score > best_score * 1.10:
+            best_score = score
             best_separation = separation
             best_bpm = test_bpm
 
-    if best_separation < 0:
-        return bpm, 0.0
-    return best_bpm, best_separation
+    return best_bpm, max(0.0, best_separation)
 
 
 def _safe_hpss_component(component: Optional[np.ndarray], fallback: np.ndarray) -> np.ndarray:
@@ -336,6 +354,9 @@ def analyze_tempo(
         top_5 = sorted(scored_aliases, key=lambda x: x["score"], reverse=True)[:5]
         candidate_summary = ", ".join([f"{c['bpm']:.1f}({c['score']:.2f})" for c in top_5])
         logger.info("🔍 Top BPM candidates [bpm(score)]: %s", candidate_summary)
+        # Show detailed breakdown for top 2 to debug tie-breaking
+        for idx, c in enumerate(top_5[:2]):
+            logger.info(f"  #{idx+1}: {c['bpm']:.1f} BPM → score={c['score']:.4f}, octave_pref={c.get('octave_preference', 0):.2f}, alignment={c.get('alignment', 0):.2f}, detector={c.get('detector_support', 0):.2f}")
 
     # Strategy 2: Extended Alias Factors - DISABLED (was causing BPM errors)
     # This logic was too aggressive and introduced more errors than it fixed
@@ -433,48 +454,135 @@ def analyze_tempo(
     
     # MID-TEMPO OCTAVE VALIDATION ZONE (85-110 BPM)
     # For tempos in the ambiguous middle range, check if other multiples have stronger beat alignment
-    # This fixes cases like "2 Become 1" (86 BPM detected, should be ~144 which is 1.67x)
-    # Only apply to short clips where onset validation is disabled
+    # Apply generalized octave correction based on onset-energy separation
+    # Only apply to short clips where full onset validation is disabled
     in_mid_tempo_zone = (85 <= final_bpm <= 110)
+    
     if is_short_clip and in_mid_tempo_zone and onset_env is not None and len(onset_env) > 0:
-        # Check beat strength at current tempo vs various multiples
+        if bpm_confidence >= 0.90:
+            logger.info(
+                "⏭️ Mid-tempo check skipped (high confidence %.2f for %.1f BPM)",
+                bpm_confidence,
+                final_bpm,
+            )
+        else:
+            # Use weighted separation that prefers musically typical mid/high tempos
+            def _weighted_separation(test_bpm: float, separation: float) -> float:
+                alignment = tempo_alignment_score(test_bpm)
+                return separation * (0.7 + 0.3 * alignment)
+
+            current_separation = _compute_onset_energy_separation(final_bpm, onset_env, sr, ANALYSIS_HOP_LENGTH) or 0.0
+            best_score = _weighted_separation(final_bpm, current_separation)
+            best_factor = None
+            best_separation = current_separation
+
+            test_factors = [1.5, 1.55]  # Preview-friendly factors (aim near dotted-quarter tempos)
+            improvement_threshold = 1.20
+
+            for factor in test_factors:
+                test_bpm = final_bpm * factor
+                if test_bpm > _MAX_ALIAS_BPM or test_bpm > 152.0:
+                    continue
+                test_separation = _compute_onset_energy_separation(test_bpm, onset_env, sr, ANALYSIS_HOP_LENGTH) or 0.0
+                weighted_score = _weighted_separation(test_bpm, test_separation)
+
+                if weighted_score > best_score * improvement_threshold:
+                    best_score = weighted_score
+                    best_factor = factor
+                    best_separation = test_separation
+
+            if best_factor is not None:
+                corrected_bpm = final_bpm * best_factor
+                logger.info(
+                    "🎯 Mid-tempo correction: %.1f → %.1f BPM (×%.2f, separation %.3f → %.3f, weighted improvement %.1fx)",
+                    final_bpm,
+                    corrected_bpm,
+                    best_factor,
+                    current_separation,
+                    best_separation,
+                    best_score / max(_weighted_separation(final_bpm, current_separation), 0.01),
+                )
+                final_bpm = corrected_bpm
+                bpm_confidence *= 0.95  # Slight confidence reduction for correction
+            else:
+                logger.info(
+                    "🔍 Mid-tempo check: keeping %.1f BPM (no factor showed >%.2fx improvement, current sep=%.3f)",
+                    final_bpm,
+                    improvement_threshold,
+                    current_separation,
+                )
+    
+    # EXTENDED OCTAVE VALIDATION FOR SHORT CLIPS (all tempo ranges)
+    # Handles both high-tempo (>160 BPM might need ÷2) and low-tempo (<70 BPM might need ×2) errors
+    # Only for short clips where standard onset validation is disabled
+    if is_short_clip and skip_onset_validation and onset_env is not None and len(onset_env) > 0:
         current_separation = _compute_onset_energy_separation(final_bpm, onset_env, sr, ANALYSIS_HOP_LENGTH) or 0.0
-        
-        # Try common octave/tempo multiples: 1.5x, 1.67x (5/3), and 2x
-        test_factors = [1.5, 5.0/3.0, 2.0]
         best_factor = None
         best_separation = current_separation
+        best_bpm = final_bpm
         
+        # Use different improvement thresholds based on BPM range
+        # High/low tempo errors are more critical, so use lower threshold
+        if final_bpm > 170 or final_bpm < 85:
+            improvement_threshold_ext = 1.15  # More lenient for extreme tempo errors
+        else:
+            improvement_threshold_ext = 1.30  # More conservative for mid-range
+        
+        # Determine which octave factors to test based on current BPM
+        test_factors = []
+        
+        # High-tempo errors (>170 BPM) - might be detecting double speed
+        if final_bpm > 170:
+            test_factors = [0.5, 0.67, 0.75]  # Try halving and related factors
+            logger.info(f"🔍 High-tempo check: {final_bpm:.1f} BPM, testing half-speed factors: {test_factors}")
+        
+        # Low-tempo errors (<85 BPM but not in mid-tempo zone) - might be detecting half speed
+        elif final_bpm < 85:
+            test_factors = [2.0, 1.5, 1.33]  # Try doubling and related factors
+            logger.info(f"🔍 Low-tempo check: {final_bpm:.1f} BPM, testing double-speed factors: {test_factors}")
+        
+        # No middle range testing - those are usually correct or handled by mid-tempo validator
+        else:
+            test_factors = []  # Skip extended validator for 70-170 BPM range
+        
+        # Test each factor
         for factor in test_factors:
             test_bpm = final_bpm * factor
-            if test_bpm > _MAX_ALIAS_BPM:
+            # Keep results in reasonable BPM range (40-250)
+            if test_bpm < 40 or test_bpm > 250:
                 continue
+            
             test_separation = _compute_onset_energy_separation(test_bpm, onset_env, sr, ANALYSIS_HOP_LENGTH) or 0.0
             
-            # Require 1.25x improvement (lower threshold for better detection)
-            improvement_threshold = 1.25
-            if test_separation > best_separation * improvement_threshold:
+            logger.info(
+                f"  Testing factor {factor:.2f}: {final_bpm:.1f} → {test_bpm:.1f} BPM, "
+                f"separation {current_separation:.3f} → {test_separation:.3f} "
+                f"(ratio: {test_separation / max(current_separation, 0.01):.2f}x, threshold: {improvement_threshold_ext:.2f}x)"
+            )
+            
+            if test_separation > best_separation * improvement_threshold_ext:
                 best_separation = test_separation
                 best_factor = factor
+                best_bpm = test_bpm
         
-        if best_factor is not None:
-            corrected_bpm = final_bpm * best_factor
+        if best_factor is not None and best_bpm != final_bpm:
+            improvement_ratio = best_separation / max(current_separation, 0.01)
             logger.info(
-                "🎯 Mid-tempo octave correction: %.1f → %.1f BPM (×%.2f, separation %.3f → %.3f, improvement %.1fx)",
+                "🎯 Extended octave correction: %.1f → %.1f BPM (×%.2f, separation %.3f → %.3f, improvement %.1fx)",
                 final_bpm,
-                corrected_bpm,
+                best_bpm,
                 best_factor,
                 current_separation,
                 best_separation,
-                best_separation / max(current_separation, 0.01),
+                improvement_ratio,
             )
-            final_bpm = corrected_bpm
-            bpm_confidence *= 0.95  # Slight confidence reduction for correction
-        else:
+            final_bpm = best_bpm
+            bpm_confidence *= 0.90  # Confidence reduction for correction
+        elif test_factors:
             logger.info(
-                "🔍 Mid-tempo check: keeping %.1f BPM (no factor showed >%.2fx improvement, current sep=%.3f)",
+                "🔍 Extended octave check: keeping %.1f BPM (no factor showed >%.2fx improvement, current sep=%.3f)",
                 final_bpm,
-                improvement_threshold,
+                improvement_threshold_ext,
                 current_separation,
             )
 

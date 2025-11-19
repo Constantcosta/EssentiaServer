@@ -96,4 +96,52 @@ else
     echo "❌ Test failed with exit code: $TEST_RESULT"
 fi
 
+# Refresh stable “latest” CSV pointers for the GUI after successful runs
+if [ $TEST_RESULT -eq 0 ]; then
+    # Find the newest timestamped CSV produced by the test run
+    LATEST_CSV=$(ls -t csv/test_results_*.csv 2>/dev/null | head -n 1)
+    if [ -n "$LATEST_CSV" ]; then
+        echo "ℹ Updating latest CSV pointers from $LATEST_CSV"
+        cp "$LATEST_CSV" csv/test_results_latest.csv
+        case $TEST_TYPE in
+            "c"|"preview-calibration")
+                cp "$LATEST_CSV" csv/test_results_c_latest.csv
+                META_TARGET="csv/test_results_c_latest.meta.json"
+                ;;
+            "a"|"preview-batch")
+                cp "$LATEST_CSV" csv/test_results_a_latest.csv
+                META_TARGET="csv/test_results_a_latest.meta.json"
+                ;;
+            "b"|"full-batch")
+                cp "$LATEST_CSV" csv/test_results_b_latest.csv
+                META_TARGET="csv/test_results_b_latest.meta.json"
+                ;;
+            "d"|"full-calibration")
+                cp "$LATEST_CSV" csv/test_results_d_latest.csv
+                META_TARGET="csv/test_results_d_latest.meta.json"
+                ;;
+        esac
+        # Write metadata for the GUI to read (commit, branch, timestamp, test type, csv path)
+        GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+        GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+        RUN_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        META_FILE="${META_TARGET:-csv/test_results_latest.meta.json}"
+        cat > "$META_FILE" <<EOF
+{
+  "csv": "$(basename "$LATEST_CSV")",
+  "csv_path": "$(cd "$(dirname "$LATEST_CSV")" && pwd)/$(basename "$LATEST_CSV")",
+  "test_type": "$TEST_TYPE",
+  "git_commit": "$GIT_COMMIT",
+  "git_branch": "$GIT_BRANCH",
+  "run_timestamp_utc": "$RUN_TS"
+}
+EOF
+        echo "RESULT_CSV=$LATEST_CSV"
+        echo "RESULT_META=$META_FILE"
+        echo "RESULT_COMMIT=$GIT_COMMIT"
+    else
+        echo "⚠️ No CSV files found to update latest pointers."
+    fi
+fi
+
 exit $TEST_RESULT

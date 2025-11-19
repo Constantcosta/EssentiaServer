@@ -16,7 +16,10 @@ extension MacStudioServerManager {
     // Note: iOS apps cannot launch external processes
     // The Python server must be started manually on the Mac Studio
     
-    func startServer() async {
+    /// Start the analyzer process.
+    /// - Parameter skipPreflight: When true, skips health/shutdown checks for a cleaner restart
+    ///   (used by batch restarts where we already stopped the server).
+    func startServer(skipPreflight: Bool = false) async {
         userStoppedServer = false
         #if os(macOS)
         guard serverProcess?.isRunning != true else {
@@ -38,9 +41,11 @@ extension MacStudioServerManager {
             return
         }
 
-        // Ensure we are not leaving an older Python build running in the background,
-        // otherwise we keep talking to stale code and hit _GeneratorContextManager errors.
-        await shutdownExistingServerIfNeeded()
+        if !skipPreflight {
+            // Ensure we are not leaving an older Python build running in the background,
+            // otherwise we keep talking to stale code and hit _GeneratorContextManager errors.
+            await shutdownExistingServerIfNeeded()
+        }
         
         let pythonURL: URL
         do {
@@ -64,8 +69,13 @@ extension MacStudioServerManager {
         var environment = ProcessInfo.processInfo.environment
         environment["PYTHONPATH"] = repoRoot.path
         environment["PYTHONUNBUFFERED"] = "1"
-        // Enable parallel analysis with 6 workers to utilize multi-core CPU
-        environment["ANALYSIS_WORKERS"] = "6"
+        // Opt into preview-friendly defaults regardless of user shell/.env so GUI runs stay fast.
+        environment["ANALYSIS_WORKERS"] = "6"            // match GUI concurrency
+        environment["MAX_ANALYSIS_SECONDS"] = "30"       // cap per clip (previews)
+        environment["ANALYSIS_SAMPLE_RATE"] = "12000"    // lighter preview profile
+        environment["CHUNK_ANALYSIS_SECONDS"] = "15"     // keep chunking but lighter
+        environment["CHUNK_OVERLAP_SECONDS"] = "5"
+        environment["MIN_CHUNK_DURATION_SECONDS"] = "5"
         // Clear log on startup
         environment["CLEAR_LOG"] = "1"
         process.environment = environment
@@ -160,7 +170,9 @@ extension MacStudioServerManager {
     func restartServer() async {
         await stopServer(userTriggered: false)
         try? await Task.sleep(for: .seconds(1))
-        await startServer()
+        // On restart we already issued /shutdown and cleaned up processes,
+        // so skip the extra /health preflight to avoid noisy connection errors.
+        await startServer(skipPreflight: true)
     }
 
     func autoStartServerIfNeeded(autoManageEnabled: Bool, overrideUserStop: Bool = false) async {

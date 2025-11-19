@@ -37,6 +37,7 @@
 		ABCD0000000000000000000F /* test_12_fullsong.csv in Resources */ = {isa = PBXBuildFile; fileRef = ABCD00000000000000000010 /* test_12_fullsong.csv */; };
 		SONG00000000000000000001 /* SongTitleNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SONG00000000000000000002 /* SongTitleNormalizer.swift */; };
 		D0F6A1B5C7E8421E9C4EABCD /* MacStudioServerManager+Python.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F6A1B5C7E8421E9C4EABCC /* MacStudioServerManager+Python.swift */; };
+		REPC00000000000000000001 /* RepertoireAnalysisController.swift in Sources */ = {isa = PBXBuildFile; fileRef = REPC00000000000000000002 /* RepertoireAnalysisController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -70,6 +71,7 @@
 		ABCD00000000000000000010 /* test_12_fullsong.csv */ = {isa = PBXFileReference; lastKnownFileType = text; path = test_12_fullsong.csv; sourceTree = "<group>"; };
 		SONG00000000000000000002 /* SongTitleNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongTitleNormalizer.swift; sourceTree = "<group>"; };
 		D0F6A1B5C7E8421E9C4EABCC /* MacStudioServerManager+Python.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MacStudioServerManager+Python.swift"; sourceTree = "<group>"; };
+		REPC00000000000000000002 /* RepertoireAnalysisController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepertoireAnalysisController.swift; sourceTree = "<group>"; };
 		A100000100000000000B /* MacStudioServerSimulator.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacStudioServerSimulator.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -97,6 +99,7 @@
 				5B415A5F03A445D1960BE952 /* ServerManagementQuickAnalyze.swift */,
 				D7AA02186F5843A095B18CB0 /* ServerManagementAutoManage.swift */,
 				ABCD00000000000000000002 /* ServerManagementTestsTab.swift */,
+				REPC00000000000000000002 /* RepertoireAnalysisController.swift */,
 				ABCD00000000000000000004 /* ABCDTestRunner.swift */,
 				ABCD00000000000000000006 /* ABCDResultsDashboard.swift */,
 				ABCD00000000000000000008 /* SpotifyReferenceData.swift */,
@@ -237,6 +240,7 @@
 				A1B31B36FDB24B129C6A692C /* ServerManagementLogsTab.swift in Sources */,
 				D7AA02186F5843A095B18CB1 /* ServerManagementAutoManage.swift in Sources */,
 				ABCD00000000000000000001 /* ServerManagementTestsTab.swift in Sources */,
+				REPC00000000000000000001 /* RepertoireAnalysisController.swift in Sources */,
 				ABCD00000000000000000003 /* ABCDTestRunner.swift in Sources */,
 				ABCD00000000000000000005 /* ABCDResultsDashboard.swift in Sources */,
 				ABCD00000000000000000007 /* SpotifyReferenceData.swift in Sources */,

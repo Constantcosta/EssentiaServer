@@ -166,9 +166,13 @@ class ABCDTestRunner: ObservableObject {
                 }
             }
             
-            if cleanLine.contains("Results saved to:") {
-                if let path = cleanLine.components(separatedBy: "Results saved to:").last?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !path.isEmpty {
+            // Capture CSV path from CLI output (supports both colon and no-colon variants)
+            if let range = cleanLine.range(of: "Results saved to") {
+                let pathPart = cleanLine[range.upperBound...]
+                let path = pathPart
+                    .replacingOccurrences(of: ":", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !path.isEmpty {
                     csvPath = path
                     addOutput("📁 Detected CSV output: \(path)")
                 }

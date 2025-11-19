@@ -10,7 +10,6 @@ typealias AudioAnalysisError = MacStudioServerManager.AudioAnalysisError
 
 struct AudioDropAnalyzer: View {
     @ObservedObject var manager: MacStudioServerManager
-    @AppStorage("autoManageLocalServer") private var autoManageLocalServer = true
     @State private var isTargeted = false
     @State private var isAnalyzing = false
     @State private var lastFileName: String = ""
@@ -61,12 +60,12 @@ struct AudioDropAnalyzer: View {
                 VStack(spacing: 8) {
                     Image(systemName: "square.and.arrow.down.on.square")
                         .font(.system(size: 32, weight: .medium))
-                        .foregroundColor((manager.isServerRunning || autoManageLocalServer) ? .accentColor : .secondary)
+                        .foregroundColor(manager.isServerRunning ? .accentColor : .secondary)
                     
-                    Text((manager.isServerRunning || autoManageLocalServer) ? "Drop audio files (.m4a, .mp3, .wav, .flac)" : "Start the server to analyze files")
+                    Text(manager.isServerRunning ? "Drop audio files (.m4a, .mp3, .wav, .flac)" : "Start the server to analyze files")
                         .font(.headline)
                     
-                    Text(autoManageLocalServer ? "Files stay on your Mac—I'll start the server for you." : "Files stay on your Mac—just a quick POST to /analyze_data.")
+                    Text("Files stay on your Mac—just a quick POST to /analyze_data.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -79,7 +78,7 @@ struct AudioDropAnalyzer: View {
                 isTargeted = hovering
             }
             .onTapGesture {
-                if manager.isServerRunning || autoManageLocalServer {
+                if manager.isServerRunning {
                     openFilePicker()
                 } else {
                     let message = AudioAnalysisError.serverOffline.errorDescription ?? "Start the Python server before analyzing."
@@ -100,7 +99,7 @@ struct AudioDropAnalyzer: View {
                 Label("Choose File…", systemImage: "folder.badge.plus")
             }
             .buttonStyle(.bordered)
-            .disabled(isAnalyzing || (!manager.isServerRunning && !autoManageLocalServer))
+            .disabled(isAnalyzing || !manager.isServerRunning)
             
             Text("Analyzes full tracks and auto-samples 15s windows for extra accuracy. Select multiple files to batch import.")
                 .font(.caption)
