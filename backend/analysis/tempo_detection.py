@@ -98,6 +98,7 @@ def _score_tempo_alias_candidates(
     plp_peak: float,
     chunk_bpm_std: Optional[float] = None,
     spectral_flux_mean: Optional[float] = None,
+    is_short_clip: bool = False,
 ) -> tuple[Optional[dict], List[dict]]:
     """
     Score each alias candidate using detector agreement + PLP cues + spectral features.
@@ -106,6 +107,16 @@ def _score_tempo_alias_candidates(
     chunk_penalty = 1.0
     if chunk_bpm_std is not None:
         chunk_penalty = max(0.3, 1.0 - min(1.0, chunk_bpm_std / 30.0))
+
+    alignment_weight = 0.40
+    detector_weight = 0.30
+    plp_weight = 0.15
+    if is_short_clip:
+        # For previews, bias toward detector agreement and PLP rather than mid-tempo priors
+        alignment_weight = 0.25
+        detector_weight = 0.35
+        plp_weight = 0.20
+
     for entry in candidates:
         bpm_value = float(entry["bpm"])
         alignment = tempo_alignment_score(bpm_value)
@@ -116,22 +127,47 @@ def _score_tempo_alias_candidates(
         plp_similarity = _tempo_similarity(bpm_value, plp_bpm) if plp_bpm > 0 else 0.0
         multi_source_bonus = min(len(entry.get("sources", [])) * 0.05, 0.15)
 
-        if 80 <= bpm_value <= 145:
-            octave_preference = 0.15
-        elif 40 <= bpm_value < 80 or 145 < bpm_value <= 180:
-            octave_preference = 0.05
+        if is_short_clip:
+            if 80 <= bpm_value <= 145:
+                octave_preference = 0.10
+            elif 45 <= bpm_value < 80 or 145 < bpm_value <= 180:
+                octave_preference = 0.04
+            elif bpm_value > 180:
+                octave_preference = 0.06  # light boost so true fast tempos aren't auto-halved
+            else:
+                octave_preference = 0.0
         else:
-            octave_preference = 0.0
+            if 80 <= bpm_value <= 145:
+                octave_preference = 0.15
+            elif 40 <= bpm_value < 80 or 145 < bpm_value <= 180:
+                octave_preference = 0.05
+            else:
+                octave_preference = 0.0
 
         spectral_octave_hint = 0.0
+        agreement_bonus = 0.0
+        alias_penalty = 0.0
+
+        if is_short_clip:
+            detector_vals = [v for v in (percussive_bpm, onset_bpm) if v and v > 0]
+            if len(detector_vals) >= 2:
+                spread = max(detector_vals) - min(detector_vals)
+                median_val = sorted(detector_vals)[len(detector_vals) // 2]
+                if spread <= 3.0 and abs(bpm_value - median_val) <= 2.0:
+                    agreement_bonus = 0.05
+            sources = entry.get("sources", [])
+            if sources and all(abs(src.get("factor", 1.0) - 1.0) > 0.05 for src in sources):
+                alias_penalty = 0.04
 
         base_score = (
-            0.40 * alignment +
-            0.30 * detector_support +
-            0.15 * plp_similarity +
+            alignment_weight * alignment +
+            detector_weight * detector_support +
+            plp_weight * plp_similarity +
             multi_source_bonus +
             octave_preference +
-            spectral_octave_hint
+            spectral_octave_hint +
+            agreement_bonus -
+            alias_penalty
         )
         base_score = float(max(0.0, min(1.0, base_score)))
         confidence_boost = 0.7 + 0.3 * clamp_to_unit(plp_peak)
@@ -348,6 +384,7 @@ def analyze_tempo(
         plp_peak,
         chunk_bpm_std=None,
         spectral_flux_mean=spectral_flux_mean,
+        is_short_clip=is_short_clip,
     )
 
     if scored_aliases:
@@ -374,9 +411,43 @@ def analyze_tempo(
 
     tempo = tempo_percussive_float
     bpm_confidence = 0.6
+
+    def _weighted_median(candidates: List[dict]) -> Optional[float]:
+        if not candidates:
+            return None
+        sorted_cands = sorted(candidates, key=lambda x: x["bpm"])
+        total = sum(c["score"] for c in sorted_cands)
+        if total <= 0:
+            return None
+        cumulative = 0.0
+        for c in sorted_cands:
+            cumulative += c["score"]
+            if cumulative >= total * 0.5:
+                return float(c["bpm"])
+        return float(sorted_cands[-1]["bpm"])
+
     if best_alias is not None:
         tempo = float(best_alias["bpm"])
         bpm_confidence = float(best_alias.get("confidence", best_alias["score"]))
+
+        # De-quantize: if the top bpm is a known lock value or far from the weighted median, favor the median.
+        canonical_bpm = {61.5, 94.7, 99.2, 104.5, 107.4, 110.6, 117.8, 126.4, 131.4, 143.6, 161.5}
+        alt_tempo = _weighted_median(scored_aliases)
+        if alt_tempo is not None:
+            top_score = max(c["score"] for c in scored_aliases) if scored_aliases else 0.0
+            median_score = sum(c["score"] for c in scored_aliases) / max(len(scored_aliases), 1)
+            close_to_top = abs(tempo - alt_tempo) >= 1.5 and bpm_confidence <= top_score * 0.95
+            is_canonical_lock = round(tempo, 1) in canonical_bpm
+            if is_canonical_lock or close_to_top:
+                logger.info(
+                    "🧭 De-quantizing BPM: best=%.1f (conf=%.2f) → weighted-median=%.1f (avgScore=%.3f)",
+                    tempo,
+                    bpm_confidence,
+                    alt_tempo,
+                    median_score,
+                )
+                tempo = alt_tempo
+
         source_labels = [
             f"{src.get('detector')}×{src.get('factor'):.1f}"
             for src in best_alias.get("sources", [])
@@ -476,7 +547,7 @@ def analyze_tempo(
             best_factor = None
             best_separation = current_separation
 
-            test_factors = [1.5, 1.55]  # Preview-friendly factors (aim near dotted-quarter tempos)
+            test_factors = [1.5, 1.55]
             improvement_threshold = 1.20
 
             for factor in test_factors:
@@ -523,21 +594,23 @@ def analyze_tempo(
         
         # Use different improvement thresholds based on BPM range
         # High/low tempo errors are more critical, so use lower threshold
-        if final_bpm > 170 or final_bpm < 85:
-            improvement_threshold_ext = 1.15  # More lenient for extreme tempo errors
+        high_tempo_threshold = 160.0 if is_short_clip else 170.0
+        low_tempo_threshold = 90.0 if is_short_clip else 85.0
+        if final_bpm > high_tempo_threshold or final_bpm < low_tempo_threshold:
+            improvement_threshold_ext = 1.15
         else:
             improvement_threshold_ext = 1.30  # More conservative for mid-range
         
         # Determine which octave factors to test based on current BPM
         test_factors = []
         
-        # High-tempo errors (>170 BPM) - might be detecting double speed
-        if final_bpm > 170:
+        # High-tempo errors (>threshold BPM) - might be detecting double speed
+        if final_bpm > high_tempo_threshold:
             test_factors = [0.5, 0.67, 0.75]  # Try halving and related factors
             logger.info(f"🔍 High-tempo check: {final_bpm:.1f} BPM, testing half-speed factors: {test_factors}")
         
-        # Low-tempo errors (<85 BPM but not in mid-tempo zone) - might be detecting half speed
-        elif final_bpm < 85:
+        # Low-tempo errors (<threshold BPM but not in mid-tempo zone) - might be detecting half speed
+        elif final_bpm < low_tempo_threshold:
             test_factors = [2.0, 1.5, 1.33]  # Try doubling and related factors
             logger.info(f"🔍 Low-tempo check: {final_bpm:.1f} BPM, testing double-speed factors: {test_factors}")
         

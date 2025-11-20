@@ -8,10 +8,13 @@ Inputs:
 
 Outputs:
 - Console summary of BPM + key accuracy and error patterns.
+- Optional append-only log for CLI iterations.
 """
 
 from __future__ import annotations
 
+import argparse
+import datetime as _dt
 import sys
 from pathlib import Path
 
@@ -52,7 +55,7 @@ def load_ground_truth(csv_path: Path) -> dict[str, dict]:
     """Load expected BPM/key from 90 preview list.csv."""
     df = pd.read_csv(csv_path)
 
-    ground = {}
+    ground = []
     for _, row in df.iterrows():
         title = str(row["Song"]).strip()
         artist = str(row["Artist"]).strip()
@@ -64,12 +67,14 @@ def load_ground_truth(csv_path: Path) -> dict[str, dict]:
         if not ground_key and key_cam:
             ground_key = key_cam
 
-        ground[f"{artist}::{title}"] = {
+        ground.append(
+            {
             "bpm": bpm,
             "key": ground_key,
             "title": title,
             "artist": artist,
         }
+        )
     return ground
 
 
@@ -78,22 +83,44 @@ def load_results(csv_path: Path) -> dict[str, dict]:
     df = pd.read_csv(csv_path)
     df = df[df["test_type"] == "repertoire-90"]
 
-    results = {}
+    results = []
     for _, row in df.iterrows():
         song = str(row["song_title"]).strip()
         artist = str(row["artist"]).strip()
         bpm = float(row["bpm"])
         key = str(row["key"]).strip()
-        results[f"{artist}::{song}"] = {
+        results.append(
+            {
             "bpm": bpm,
             "key": key,
             "title": song,
             "artist": artist,
         }
+        )
     return results
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Compare repertoire-90 analysis results against Spotify ground truth")
+    parser.add_argument(
+        "--results",
+        type=str,
+        default=None,
+        help="Path to a test_results CSV to analyze (defaults to latest repertoire-90)",
+    )
+    parser.add_argument(
+        "--log",
+        action="store_true",
+        help="Append a one-line summary to reports/repertoire_iterations.log",
+    )
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        default=str(Path("reports") / "repertoire_iterations.log"),
+        help="Path to append log output when --log is set",
+    )
+    args = parser.parse_args()
+
     repo_root = Path(__file__).parent
     ground_csv = repo_root / "csv" / "90 preview list.csv"
 
@@ -101,15 +128,21 @@ def main() -> None:
         print(f"❌ Ground truth CSV not found at {ground_csv}")
         sys.exit(1)
 
-    # Find most recent repertoire-90 results CSV
-    csv_dir = repo_root / "csv"
-    candidates = sorted(csv_dir.glob("test_results_*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
     results_csv: Path | None = None
-    for p in candidates:
-        df = pd.read_csv(p, nrows=5)
-        if "test_type" in df.columns and (df["test_type"] == "repertoire-90").any():
-            results_csv = p
-            break
+    if args.results:
+        results_csv = Path(args.results)
+        if not results_csv.exists():
+            print(f"❌ Results CSV not found at {results_csv}")
+            sys.exit(1)
+    else:
+        # Find most recent repertoire-90 results CSV
+        csv_dir = repo_root / "csv"
+        candidates = sorted(csv_dir.glob("test_results_*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for p in candidates:
+            df = pd.read_csv(p, nrows=5)
+            if "test_type" in df.columns and (df["test_type"] == "repertoire-90").any():
+                results_csv = p
+                break
 
     if results_csv is None:
         print("❌ No repertoire-90 results CSV found (test_type == 'repertoire-90').")
@@ -133,25 +166,39 @@ def main() -> None:
     print("=" * 100)
     print()
 
-    # We match in ground truth order, but results keys are (artist::title) for reliable join
-    for key_id, expected in ground.items():
+    use_index_alignment = len(results) == len(ground)
+    if use_index_alignment:
+        print("Alignment: index order (90 preview files are 1:1 with ground truth)")
+    else:
+        print("Alignment: fuzzy by artist/title (counts differ; index order disabled)")
+    print()
+
+    # Iterate in ground truth order; if counts match, align by index for deterministic matching
+    iterable = enumerate(ground) if use_index_alignment else ((idx, item) for idx, item in enumerate(ground))
+
+    for idx, expected in iterable:
         artist = expected["artist"]
         title = expected["title"]
-        # Our analysis used artist token from filename (e.g., "Savage", "Linkin"), so we fuzz by title only if needed.
-        result_entry = None
-
-        # First, exact artist::title key
-        if key_id in results:
-            result_entry = results[key_id]
+        if use_index_alignment:
+            try:
+                result_entry = results[idx]
+            except IndexError:
+                print(f"⚠️  Missing result for index {idx+1}: {artist} - {title}")
+                continue
         else:
-            # Fallback: try matching by title only
-            matches = [v for v in results.values() if v["title"].endswith(title.replace(" ", "_")) or v["title"].replace("_", " ") == title]
-            if matches:
-                result_entry = matches[0]
-
-        if result_entry is None:
-            print(f"⚠️  {artist} - {title} : NOT FOUND in repertoire results")
-            continue
+            key_id = f"{artist}::{title}"
+            result_entry = None
+            if results and isinstance(results, list):
+                # Linear search fallback if results came back as a list with different order
+                matches = [
+                    r
+                    for r in results
+                    if r["artist"] == artist or r["title"].endswith(title.replace(" ", "_")) or r["title"].replace("_", " ") == title
+                ]
+                result_entry = matches[0] if matches else None
+            if result_entry is None:
+                print(f"⚠️  {artist} - {title} : NOT FOUND in repertoire results")
+                continue
 
         bpm_match, bpm_reason = compare_bpm(expected["bpm"], result_entry["bpm"])
         key_match, key_reason = compare_key(expected["key"], result_entry["key"])
@@ -205,6 +252,17 @@ def main() -> None:
     print(f"Overall:       {bpm_correct + key_correct}/{total * 2} ({(bpm_correct + key_correct)/(total * 2)*100:.1f}%)")
     print()
 
+    if args.log:
+        log_path = Path(args.log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = _dt.datetime.now().isoformat(timespec="seconds")
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"{timestamp} | {results_csv.name} | BPM {bpm_correct}/{total} ({bpm_correct/total*100:.1f}%) | "
+                f"Key {key_correct}/{total} ({key_correct/total*100:.1f}%) | Overall {(bpm_correct + key_correct)/(total*2)*100:.1f}% | "
+                f"alignment={'index' if use_index_alignment else 'fuzzy'}\n"
+            )
+
     # Group issues
     octave_errors = [i for i in issues if i["type"] == "BPM" and "speed" in i.get("reason", "")]
     other_bpm = [i for i in issues if i["type"] == "BPM" and "speed" not in i.get("reason", "")]
@@ -242,4 +300,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

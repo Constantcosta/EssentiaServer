@@ -1,0 +1,13 @@
+test_type,song_title,artist,file_type,success,duration_s,bpm,key,energy,danceability,valence,acousticness,instrumentalness,liveness,speechiness,error
+Batch 1,Cyrus_Prisoner__feat__Dua_Lipa_,Miley,preview,True,9.51914095878601,126.43179777527641,D# Minor,0.7483833985033708,0.783683424717964,0.6021793685327241,0.20974798891187618,,,,
+Batch 1,Green_Forget_You,CeeLo,preview,True,9.557296752929688,126.43179777527641,G Major,0.791934997958978,0.7996323460233594,0.648455315341067,0.22525739575230508,,,,
+Batch 1,___Song_Fomerly_Known_As_,Regurgitator,preview,True,9.609774827957153,117.7812984290361,F# Minor,0.785709429442113,0.7996152247433364,0.602633094347245,0.16440720156668942,,,,
+Batch 1,Smith___Broods_1000x,Jarryd,preview,True,9.349104881286621,114.0202117567577,G# Major,0.6968790303964797,0.7479778431821875,0.648455315341067,0.3224046968852179,,,,
+Batch 1,Girls_2_Become_1,Spice,preview,True,9.589502096176147,143.5546875,F# Major,0.6778632120846061,0.7099216975439346,0.6382204989365616,0.2605341183482385,,,,
+Batch 1,20_3am,Matchbox,preview,True,9.565725088119507,110.57254897383584,G# Major,0.7332377570577195,0.7806601186375428,0.648455315341067,0.21829616195962376,,,,
+Batch 2,Veronicas_4ever_,The,preview,False,4.94378924369812,,,,,,,,,,
+Batch 2,Parton_9_to_5,Dolly,preview,False,5.0390191078186035,,,,,,,,,,
+Batch 2,Carlton_A_Thousand_Miles,Vanessa,preview,False,4.976001977920532,,,,,,,,,,
+Batch 2,Perri_A_Thousand_Years,Christina,preview,False,4.967242956161499,,,,,,,,,,
+Batch 2,A_Whole_New_World,ZAYN,preview,False,4.987694978713989,,,,,,,,,,
+Batch 2,About_Damn_Time_,Lizzo,preview,False,5.040503978729248,,,,,,,,,,

@@ -28,7 +28,13 @@ if env_file.exists():
 else:
     print(f"⚠️ No .env file found at {env_file}, using defaults")
 
+# Ensure Flask does not require python-dotenv when we embed app.run directly
+os.environ.setdefault("FLASK_SKIP_DOTENV", "1")
+
 from flask import Flask, jsonify, request
+from flask import cli as flask_cli
+flask_cli.load_dotenv = lambda *args, **kwargs: None  # Avoid python-dotenv dependency and stderr noise
+flask_cli.show_server_banner = lambda *args, **kwargs: None  # Silence banner that can break pipes
 from flask_cors import CORS
 import logging
 import atexit
@@ -225,6 +231,16 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+# Redirect stdout/stderr to a file to avoid BrokenPipe errors when the parent shell closes pipes
+if os.environ.get("DISABLE_STDIO_REDIRECT", "").lower() not in ("1", "true"):
+    try:
+        stdio_log = Path(CONFIG.cache_dir) / "server_stdout.log"
+        stdio_log.parent.mkdir(parents=True, exist_ok=True)
+        sys.stdout = open(stdio_log, "a", encoding="utf-8")
+        sys.stderr = sys.stdout
+    except Exception:
+        pass
 
 logger = logging.getLogger(__name__)
 def _log_unhandled(exc_type, exc, tb):
@@ -458,9 +474,11 @@ register_analysis_routes(
     error_hint_from_exception=error_hint_from_exception,
 )
 
+logger.info("✅ analyze_server module initialized (routes registered).")
 
 
 if __name__ == '__main__':
+    logger.info("🚦 Entering app.run entrypoint")
     import argparse
     parser = argparse.ArgumentParser(description='Mac Studio Audio Analysis Server')
     parser.add_argument('--clear-log', action='store_true', 
@@ -495,4 +513,10 @@ if __name__ == '__main__':
     # Enable threading to handle concurrent requests from Swift TaskGroup
     # threaded=True allows Flask to handle multiple requests simultaneously
     # This works with the ProcessPoolExecutor (8 workers) for true parallelism
-    app.run(host=bind_host, port=DEFAULT_PORT, debug=False, threaded=True)
+    try:
+        app.run(host=bind_host, port=DEFAULT_PORT, debug=False, threaded=True)
+    except Exception:
+        logger.exception("❌ Flask app.run threw an exception")
+        raise
+    finally:
+        logger.info("🛑 Flask app.run returned/stopped")

@@ -116,23 +116,31 @@ class ComparisonEngine {
         guard let analyzed = analyzed, let spotify = spotify else {
             return .unavailable
         }
+
+        let analyzedD = Double(analyzed)
+        let spotifyD = Double(spotify)
+        // Allow small relative tolerance; keep a floor of 3 BPM.
+        let tolerance = max(3.0, spotifyD * 0.05)
+        func within(_ candidate: Double) -> Bool {
+            abs(analyzedD - candidate) <= tolerance
+        }
         
         // Exact match within tolerance (±3 BPM)
-        if abs(analyzed - spotify) <= 3 {
+        if within(spotifyD) {
             return .match
         }
         
         // Check for octave errors (half/double BPM)
-        let halfSpotify = spotify / 2
-        let doubleSpotify = spotify * 2
+        let halfSpotify = spotifyD / 2
+        let doubleSpotify = spotifyD * 2
         
         // Half BPM (within tolerance)
-        if abs(analyzed - halfSpotify) <= 3 {
+        if within(halfSpotify) {
             return .match  // Still considered a match (common octave error)
         }
         
         // Double BPM (within tolerance)
-        if abs(analyzed - doubleSpotify) <= 3 {
+        if within(doubleSpotify) {
             return .match  // Still considered a match (common octave error)
         }
         
@@ -144,22 +152,22 @@ class ComparisonEngine {
     }
     
     /// Compare musical keys with enharmonic equivalents
-    static func compareKey(analyzed: String?, spotify: String?) -> MetricMatch {
+    static func compareKey(analyzed: String?, reference: String?) -> MetricMatch {
         guard
             let analyzedRaw = analyzed?.trimmingCharacters(in: .whitespacesAndNewlines),
-            let spotifyRaw = spotify?.trimmingCharacters(in: .whitespacesAndNewlines),
+            let referenceRaw = reference?.trimmingCharacters(in: .whitespacesAndNewlines),
             let parsedAnalyzed = parseKey(analyzedRaw),
-            let parsedSpotify = parseKey(spotifyRaw)
+            let parsedReference = parseKey(referenceRaw)
         else {
             return .unavailable
         }
 
-        if parsedAnalyzed == parsedSpotify {
+        if parsedAnalyzed == parsedReference {
             return .match
         }
 
         return .mismatch(
-            expected: spotifyRaw,
+            expected: referenceRaw,
             actual: analyzedRaw
         )
     }
@@ -271,7 +279,7 @@ class ComparisonEngine {
         
         let keyMatch = compareKey(
             analyzed: analysis.key,
-            spotify: expectedKey
+            reference: expectedKey
         )
         
         return TrackComparison(

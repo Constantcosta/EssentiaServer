@@ -31,6 +31,18 @@ from test_analysis_utils import (
     save_results_to_csv,
 )
 
+# Optional offline pipeline imports (lazy-loaded when --offline is used)
+from typing import Tuple
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from backend.analysis import settings as analysis_settings
+except Exception:
+    analysis_settings = None  # Allows help/argparse to work even if backend deps are heavy
+
 
 def build_headers(title: str, artist: str, *, force_reanalyze: bool, cache_namespace: str | None) -> Dict[str, str]:
     headers: Dict[str, str] = {
@@ -81,12 +93,48 @@ def check_server_health(base_url: str) -> bool:
         return False
 
 
+def _setup_offline_pipeline() -> Tuple[object, int, float]:
+    """Configure calibration hooks for offline analysis."""
+    from backend.analysis.calibration import (
+        apply_bpm_calibration,
+        apply_calibration_layer,
+        apply_calibration_models,
+        apply_key_calibration,
+        load_bpm_calibration,
+        load_calibration_config,
+        load_calibration_models,
+        load_key_calibration,
+    )
+    from backend.analysis.pipeline import CalibrationHooks
+    from backend.server import configure_processing
+    from backend.server.scipy_compat import ensure_hann_patch
+
+    ensure_hann_patch()
+    load_calibration_config()
+    load_calibration_models()
+    load_key_calibration()
+    load_bpm_calibration()
+
+    hooks = CalibrationHooks(
+        apply_scalers=apply_calibration_layer,
+        apply_key=apply_key_calibration,
+        apply_bpm=apply_bpm_calibration,
+        apply_models=apply_calibration_models,
+    )
+    configure_processing(hooks)
+    workers = getattr(analysis_settings, "ANALYSIS_WORKERS", 0) if analysis_settings else 0
+    max_seconds = getattr(analysis_settings, "MAX_ANALYSIS_SECONDS", None) if analysis_settings else None
+    return hooks, workers, max_seconds or None
+
+
 def analyze_repertoire_folder(
     preview_dir: Path,
     *,
     base_url: str,
     force_reanalyze: bool,
     cache_namespace: str,
+    offline: bool = False,
+    offline_workers: int = 0,
 ) -> List[Dict[str, Any]]:
     print_header("Repertoire 90 Preview Analysis")
 
@@ -103,6 +151,14 @@ def analyze_repertoire_folder(
 
     all_results: List[Dict[str, Any]] = []
 
+    if offline:
+        from backend.server.processing import process_audio_bytes  # Local import to avoid overhead unless needed
+        hooks, default_workers, max_seconds = _setup_offline_pipeline()
+        analysis_workers = offline_workers if offline_workers is not None else default_workers
+        load_kwargs: Dict[str, object] = {"sr": None}
+        if max_seconds:
+            load_kwargs["duration"] = max_seconds
+
     start_time = time.time()
     for idx, filepath in enumerate(files, start=1):
         filename = os.path.basename(filepath)
@@ -115,24 +171,45 @@ def analyze_repertoire_folder(
             with open(filepath, "rb") as f:
                 audio_data = f.read()
 
-            response = requests.post(
-                f"{base_url}/analyze_data",
-                data=audio_data,
-                headers=build_headers(title, artist, force_reanalyze=force_reanalyze, cache_namespace=cache_namespace),
-                timeout=130,
-            )
+            if offline:
+                use_workers = max(0, offline_workers if offline_workers is not None else 0)
+                result_data = process_audio_bytes(
+                    audio_data,
+                    title,
+                    artist,
+                    skip_chunk_analysis=False,
+                    load_kwargs=load_kwargs,
+                    use_tempfile=True,
+                    temp_suffix=os.path.splitext(filename)[-1] or ".m4a",
+                    max_workers=use_workers,
+                    timeout=180,
+                )
+                status_code = 200
+                payload = result_data
+                error_text = ""
+            else:
+                response = requests.post(
+                    f"{base_url}/analyze_data",
+                    data=audio_data,
+                    headers=build_headers(title, artist, force_reanalyze=force_reanalyze, cache_namespace=cache_namespace),
+                    timeout=130,
+                )
+                status_code = response.status_code
+                payload = response.json() if response.status_code == 200 else None
+                error_text = response.text if response.status_code != 200 else ""
+
             duration = time.time() - song_start
 
             result: Dict[str, Any] = {
-                "success": response.status_code == 200,
-                "status_code": response.status_code,
+                "success": status_code == 200,
+                "status_code": status_code,
                 "song": title,
                 "artist": artist,
                 "file_type": "preview",
                 "test_type": "repertoire-90",
                 "duration": duration,
-                "data": response.json() if response.status_code == 200 else None,
-                "error": response.text if response.status_code != 200 else "",
+                "data": payload if status_code == 200 else None,
+                "error": error_text if status_code != 200 else "",
             }
         except Exception as exc:
             duration = time.time() - song_start
@@ -215,6 +292,17 @@ def main() -> None:
         default="repertoire-90",
         help="Cache namespace for this run (default: repertoire-90)",
     )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Run analysis inline without the HTTP server (uses the same pipeline)",
+    )
+    parser.add_argument(
+        "--offline-workers",
+        type=int,
+        default=0,
+        help="Number of analysis workers to use in offline mode (0 = inline, default)",
+    )
 
     args = parser.parse_args()
 
@@ -224,9 +312,12 @@ def main() -> None:
     else:
         preview_dir = Path.home() / "Documents" / "Git repo" / "Songwise 1" / "preview_samples_repertoire_90"
 
-    # Check server health first
-    if not check_server_health(args.url):
-        sys.exit(1)
+    if args.offline:
+        print_info("Running in OFFLINE mode (analysis pipeline invoked directly)")
+    else:
+        # Check server health first
+        if not check_server_health(args.url):
+            sys.exit(1)
 
     force_reanalyze = not args.allow_cache
     if force_reanalyze:
@@ -239,6 +330,8 @@ def main() -> None:
         base_url=args.url,
         force_reanalyze=force_reanalyze,
         cache_namespace=args.cache_namespace,
+        offline=args.offline,
+        offline_workers=args.offline_workers,
     )
 
     if args.csv or args.csv_auto:
@@ -248,4 +341,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

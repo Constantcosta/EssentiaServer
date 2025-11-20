@@ -136,6 +136,9 @@ def apply_calibration_layer(result: Dict[str, object]) -> Dict[str, object]:
     for feature_name, field_name in CALIBRATED_RESULT_FIELDS.items():
         if field_name not in result:
             continue
+        if feature_name == "bpm" and is_short_clip:
+            LOGGER.info("⏭️  Skipping BPM calibration for short clip (%.1fs)", signal_duration)
+            continue
         # For BPM: apply calibration but cap maximum change to ±10 BPM
         # This prevents calibration from causing octave-level errors
         # while still allowing fine-tuning adjustments

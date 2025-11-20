@@ -5,6 +5,7 @@
 
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 typealias AudioAnalysisError = MacStudioServerManager.AudioAnalysisError
 
@@ -72,10 +73,8 @@ struct AudioDropAnalyzer: View {
                 .padding()
             }
             .contentShape(RoundedRectangle(cornerRadius: 12))
-            .dropDestination(for: URL.self) { items, _ in
-                handleDrop(items)
-            } isTargeted: { hovering in
-                isTargeted = hovering
+            .onDrop(of: ["public.file-url"], isTargeted: $isTargeted) { providers in
+                handleDropFromProviders(providers)
             }
             .onTapGesture {
                 if manager.isServerRunning {
@@ -186,6 +185,41 @@ struct AudioDropAnalyzer: View {
                 }
             }
         }
+    }
+    
+    private func handleDropFromProviders(_ providers: [NSItemProvider]) -> Bool {
+        let typeIdentifier = "public.file-url"
+        var found = false
+        let group = DispatchGroup()
+        var urls: [URL] = []
+        
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(typeIdentifier) {
+                found = true
+                group.enter()
+                provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { item, _ in
+                    if let data = item as? Data,
+                       let url = URL(dataRepresentation: data, relativeTo: nil) {
+                        DispatchQueue.main.async {
+                            urls.append(url)
+                            group.leave()
+                        }
+                    } else {
+                        DispatchQueue.main.async {
+                            group.leave()
+                        }
+                    }
+                }
+            }
+        }
+        
+        guard found else { return false }
+        
+        group.notify(queue: .main) {
+            _ = handleDrop(urls)
+        }
+        
+        return true
     }
     
     private func handleDrop(_ urls: [URL]) -> Bool {
