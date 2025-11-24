@@ -27,6 +27,9 @@ struct DrumStockpileView: View {
     @State private var showDeleteConfirm = false
     @State private var autoGateInFlight = false
     @State private var autoGateStatus: String?
+    @State private var sortOrder: [KeyPathComparator<StockpileItem>] = [
+        .init(\.originalFilename, order: .forward)
+    ]
     
     init(
         store: DrumStockpileStore? = nil,
@@ -180,6 +183,9 @@ private extension DrumStockpileView {
                                 renamingGroupID = group.id
                                 renameText = group.name
                             }
+                            Button("Delete Group", role: .destructive) {
+                                store.deleteGroup(group.id)
+                            }
                         }
                     }
                 }
@@ -256,7 +262,7 @@ private extension DrumStockpileView {
             }
             .padding(.horizontal)
             .padding(.top, 6)
-            Table(filteredItems, selection: $store.selectedItemIDs) {
+            Table(sortedItems, selection: $store.selectedItemIDs, sortOrder: $sortOrder) {
                 TableColumn("Filename", value: \.originalFilename)
                 TableColumn("Class") { item in
                     classPill(item)
@@ -273,6 +279,11 @@ private extension DrumStockpileView {
             .background(TableColumnWidthPersister(storageKey: "DrumStockpile.ColumnWidths"))
             .contextMenu {
                 classificationMenu(targetIDs: store.selectedItemIDs)
+                Button {
+                    showInFinder(for: store.selectedItemIDs)
+                } label: {
+                    Label("Show in Finder", systemImage: "folder")
+                }
                 Button(role: .destructive) {
                     store.remove(items: store.selectedItemIDs)
                 } label: {
@@ -294,6 +305,10 @@ private extension DrumStockpileView {
         return store.items.filter { $0.groupID == groupID }
     }
     
+    var sortedItems: [StockpileItem] {
+        filteredItems.sorted(using: sortOrder)
+    }
+    
     @ViewBuilder
     func classPill(_ item: StockpileItem) -> some View {
         Menu {
@@ -308,6 +323,13 @@ private extension DrumStockpileView {
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)
+    }
+    
+    func showInFinder(for itemIDs: Set<UUID>) {
+        let targets = store.items.filter { itemIDs.contains($0.id) }
+        let urls = targets.map(\.originalURL)
+        guard !urls.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
     }
     
     @ViewBuilder

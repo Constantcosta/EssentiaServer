@@ -105,6 +105,23 @@ final class DrumStockpileStore: ObservableObject {
         persistState()
     }
     
+    func deleteGroup(_ groupID: UUID) {
+        guard let idx = groups.firstIndex(where: { $0.id == groupID }) else { return }
+        groups.remove(at: idx)
+        items.removeAll { $0.groupID == groupID }
+        let remainingItemIDs = Set(items.map(\.id))
+        selectedItemIDs = selectedItemIDs.intersection(remainingItemIDs)
+        if selectedGroupID == groupID {
+            selectedGroupID = groups.first?.id
+        }
+        if groups.isEmpty {
+            let fallback = StockpileGroup(name: "Ungrouped")
+            groups = [fallback]
+            selectedGroupID = fallback.id
+        }
+        persistState()
+    }
+    
     // MARK: - Ingest
     
     func ingest(urls: [URL], assignGroup groupID: UUID? = nil) {
