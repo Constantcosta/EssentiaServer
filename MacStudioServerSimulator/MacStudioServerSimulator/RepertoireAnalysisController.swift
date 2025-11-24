@@ -10,6 +10,7 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 #endif
+import UniformTypeIdentifiers
 
 struct BpmReferenceRow {
     let songTitle: String
@@ -92,6 +93,74 @@ enum BpmReferenceParser {
     }
 }
 
+struct TruthReferenceRow {
+    let song: String
+    let artist: String
+    let bpm: Double
+    let key: String
+    let notes: String?
+}
+
+enum TruthReferenceParser {
+    static func parse(text: String) throws -> [TruthReferenceRow] {
+        var lines = text.components(separatedBy: .newlines)
+        guard !lines.isEmpty else { return [] }
+        let header = parseRow(lines.removeFirst())
+        guard let songIdx = header.firstIndex(of: "Song"),
+              let artistIdx = header.firstIndex(of: "Artist"),
+              let bpmIdx = header.firstIndex(of: "BPM"),
+              let keyIdx = header.firstIndex(of: "Key") else {
+            throw NSError(domain: "csv", code: 0, userInfo: [NSLocalizedDescriptionKey: "Missing required columns (Song, Artist, BPM, Key)"])
+        }
+        let notesIdx = header.firstIndex(of: "Notes") ?? header.firstIndex(of: "Comment")
+        
+        var result: [TruthReferenceRow] = []
+        for line in lines where !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let cols = parseRow(line)
+            guard cols.count > max(songIdx, artistIdx, bpmIdx, keyIdx) else { continue }
+            guard let bpm = Double(cols[bpmIdx]) else { continue }
+            let song = cols[songIdx]
+            let artist = cols[artistIdx]
+            let key = cols[keyIdx]
+            let notes: String?
+            if let idx = notesIdx, idx < cols.count {
+                let value = cols[idx].trimmingCharacters(in: .whitespacesAndNewlines)
+                notes = value.isEmpty ? nil : value
+            } else {
+                notes = nil
+            }
+            result.append(
+                TruthReferenceRow(
+                    song: song,
+                    artist: artist,
+                    bpm: bpm,
+                    key: key,
+                    notes: notes
+                )
+            )
+        }
+        return result
+    }
+    
+    private static func parseRow(_ row: String) -> [String] {
+        var columns: [String] = []
+        var current = ""
+        var insideQuotes = false
+        for char in row {
+            if char == "\"" {
+                insideQuotes.toggle()
+            } else if char == "," && !insideQuotes {
+                columns.append(current)
+                current = ""
+            } else {
+                current.append(char)
+            }
+        }
+        columns.append(current)
+        return columns
+    }
+}
+
 @MainActor
 final class RepertoireAnalysisController: ObservableObject {
     @Published var rows: [RepertoireRow] = []
@@ -111,6 +180,7 @@ final class RepertoireAnalysisController: ObservableObject {
     // These correspond to ambiguous rows in the 80 BPM comparison sheet.
     private let excludedBpmTruthTitles: Set<String> = []
     private var bpmReferenceRows: [BpmReferenceRow] = []
+    private var truthRows: [TruthReferenceRow] = []
     
     init(manager: MacStudioServerManager) {
         self.manager = manager
@@ -188,19 +258,13 @@ final class RepertoireAnalysisController: ObservableObject {
             let batch = Array(indices[start..<end])
             print("[POOL] Starting batch \(start + 1)-\(end) (size \(batch.count))")
             
-            // Refresh the analyzer between batches to recover from any worker crashes.
-            if start > 0 {
-                print("[POOL] Restarting analyzer before batch \(start + 1)-\(end)")
-                await manager.restartServer()
+            // Ensure the analyzer is up, but avoid per-batch restarts that can freeze the UI.
+            if !manager.isServerRunning {
+                let label = "\(start + 1)-\(end)"
+                print("[POOL] Analyzer offline before batch \(label); starting now")
+                await manager.startServer(skipPreflight: start > 0)
                 guard manager.isServerRunning else {
-                    print("❌ Analyzer not running after restart; aborting remaining batches")
-                    return
-                }
-            } else if !manager.isServerRunning {
-                print("[POOL] Analyzer not running at batch start; starting now")
-                await manager.startServer()
-                guard manager.isServerRunning else {
-                    print("❌ Analyzer failed to start; aborting run")
+                    print("❌ Analyzer failed to start before batch \(label); aborting run")
                     return
                 }
             }
@@ -387,6 +451,14 @@ final class RepertoireAnalysisController: ObservableObject {
         await loadSpotify(from: csvURL)
     }
     
+    func loadDefaultTruth() async {
+        let csvURL = manager.repoRootURL
+            .appendingPathComponent("csv")
+            .appendingPathComponent("truth_repertoire_manual.csv")
+        print("📊 Loading manual truth CSV from: \(csvURL.path)")
+        await loadTruth(from: csvURL)
+    }
+    
     func loadDefaultBpmReferences() async {
         let csvURL = manager.repoRootURL
             .appendingPathComponent("csv")
@@ -416,6 +488,16 @@ final class RepertoireAnalysisController: ObservableObject {
         }
     }
     
+    func reloadTruth() async {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.commaSeparatedText]
+        if panel.runModal() == .OK, let url = panel.url {
+            await loadTruth(from: url)
+        }
+    }
+    
     private func loadBpmReferences(from url: URL) async {
         do {
             let data = try Data(contentsOf: url)
@@ -427,6 +509,22 @@ final class RepertoireAnalysisController: ObservableObject {
             applyBpmGoogleMapping(from: parsed)
         } catch {
             print("❌ Failed to load BPM reference CSV: \(error.localizedDescription)")
+        }
+    }
+    
+    private func loadTruth(from url: URL) async {
+        do {
+            let data = try Data(contentsOf: url)
+            guard let text = String(data: data, encoding: .utf8) else {
+                throw NSError(domain: "csv", code: 0, userInfo: [NSLocalizedDescriptionKey: "File is not UTF-8"])
+            }
+            let parsed = try TruthReferenceParser.parse(text: text)
+            truthRows = parsed
+            print("✅ Loaded \(parsed.count) manual truth rows")
+            overlayTruthOntoSpotify()
+        } catch {
+            print("❌ Failed to load manual truth CSV: \(error.localizedDescription)")
+            alertMessage = "Failed to load truth CSV: \(error.localizedDescription)"
         }
     }
     
@@ -530,7 +628,7 @@ final class RepertoireAnalysisController: ObservableObject {
                 return !excludedRowNumbers.contains(index)
             }
             print("✅ Loaded \(spotifyTracks.count) Spotify tracks")
-            applyIndexMappingIf1to1()
+            overlayTruthOntoSpotify()
         } catch {
             print("❌ Failed to load Spotify CSV: \(error.localizedDescription)")
             alertMessage = "Failed to load Spotify CSV: \(error.localizedDescription)"
@@ -951,6 +1049,47 @@ final class RepertoireAnalysisController: ObservableObject {
                 spotifyTracks[index] = track
             }
         }
+        applyIndexMappingIf1to1()
+    }
+    
+    private func overlayTruthOntoSpotify() {
+        guard !spotifyTracks.isEmpty else { return }
+        
+        func key(forTitle title: String, artist: String) -> String {
+            let normTitle = RepertoireMatchNormalizer.normalize(title)
+            let normArtist = RepertoireMatchNormalizer.normalize(artist)
+            return normTitle + "|" + normArtist
+        }
+        
+        guard !truthRows.isEmpty else {
+            applyIndexMappingIf1to1()
+            return
+        }
+        
+        var exactMap: [String: TruthReferenceRow] = [:]
+        var byTitle: [String: TruthReferenceRow] = [:]
+        
+        for truth in truthRows {
+            let k = key(forTitle: truth.song, artist: truth.artist)
+            exactMap[k] = truth
+            let titleKey = RepertoireMatchNormalizer.normalize(truth.song)
+            if byTitle[titleKey] == nil {
+                byTitle[titleKey] = truth
+            }
+        }
+        
+        for index in spotifyTracks.indices {
+            var track = spotifyTracks[index]
+            let exact = key(forTitle: track.song, artist: track.artist)
+            let titleKey = RepertoireMatchNormalizer.normalize(track.song)
+            if let truth = exactMap[exact] ?? byTitle[titleKey] {
+                track.truthBpm = truth.bpm
+                track.truthKey = truth.key
+                track.truthNotes = truth.notes
+                spotifyTracks[index] = track
+            }
+        }
+        
         applyIndexMappingIf1to1()
     }
 

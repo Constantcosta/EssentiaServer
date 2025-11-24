@@ -1,4 +1,4 @@
-# Handover – CLI Repertoire Iterations & Backend Tweaks
+# Handover – Repertoire Iterations & Truth Set (80)
 _Date: 2025-11-20_
 
 ## What I did (this session)
@@ -31,22 +31,44 @@ Logs: `reports/repertoire_iterations.log` (appended each run).
 - `backend/analysis/tempo_detection.py` (preview-weighted alias scoring, octave validation tuning)
 - `backend/analysis/calibration.py` (skip BPM calibration on short clips)
 - `backend/analyze_server.py` (Flask dotenv/banner disabled, stdio redirect)
+- `csv/truth_repertoire_manual.csv` (authoritative 80-track truth set; titles/artists normalized to the repertoire view)
+- `csv/80_bpm_complete.csv` (source list used to build the 80-track truth)
 
 ## Outstanding issues / next steps
-- BPM still has ~7 clear octave errors (heart-shaped box, back in black, etc.) and many high/low off-by-40+ cases; need better half/double disambiguation without hurting mid-range.
-- Key stuck ~30%: dominant/tonic confusion (fifths) and mode errors remain; revisit short-clip tonic bias and mode vote thresholds in `key_detection.py`.
-- Offline runs use `analyse_pipeline` inline; HTTP server could not bind due to sandbox restrictions. If you need GUI integration, start the server outside the sandbox or restore header-based run.
-- Recent best CSV: `csv/test_results_20251120_182037.csv` (higher BPM, same key); last run CSV: `csv/test_results_20251120_184301.csv` (slightly lower BPM, same key).
+- BPM: still octave/double/half errors plus tempo-lock bands; need stronger half/double resolution (tempogram + onset/beat evidence) without midrange regressions.
+- Key: stuck ~30%; dominant/relative confusion; revisit tonic bias/mode votes for previews in `key_detection.py`.
+- Accuracy script still points to `csv/90 preview list.csv`; update it (or add a flag) to use `csv/truth_repertoire_manual.csv` for the 80-set comparison.
+- Offline runs use `analyse_pipeline` inline; if GUI/server needed, run outside sandbox or re-enable server path.
+- Recent best CSV (90-set): `csv/test_results_20251120_182037.csv`; last run: `csv/test_results_20251120_184301.csv`. No runs yet with the 80 truth.
 
 ## How to rerun (offline, recommended)
 ```bash
 ./tools/run_repertoire_cli.sh
 # writes csv/test_results_*.csv and appends to reports/repertoire_iterations.log
 ```
+
+### Standalone harnesses
+- Offline (no server): `.venv/bin/python tools/run_repertoire_offline.py`  
+  - Uses the online algorithms but runs them inline; slower but no server needed.
+- Online (server-backed, faster): start the analyzer server, then run  
+  `.venv/bin/python tools/run_repertoire_online.py`
 To target a specific results file for analysis only:
 ```bash
 .venv/bin/python analyze_repertoire_90_accuracy.py --results csv/test_results_20251120_182037.csv --log
 ```
+
+## Plan for next agent
+1) Update accuracy flow for the 80-set: point `analyze_repertoire_90_accuracy.py` (or a new flag) to `csv/truth_repertoire_manual.csv` instead of `csv/90 preview list.csv`.
+2) Run offline analysis via `./tools/run_repertoire_cli.sh --offline` and score against the 80 truth; record BPM/Key deltas.
+3) Tackle BPM octave/alias fixes in `backend/analysis/tempo_detection.py` (use tempogram stability + onset/beat evidence; penalize lock bands; handle 6/8/dotted cases).
+4) Tweak key detection to reduce dominant/relative confusions on previews; then re-run and log.
+5) Overhaul repertoire view to consume the new truth file for display/QA (ensure titles/artists match the normalized CSV).
+
+## Quick tips for next agent
+- Truth set: `csv/truth_repertoire_manual.csv` (80 entries, normalized titles/artists). Keep punctuation/accents (e.g., “Señorita”, quoted titles with commas, feat. info). It’s staged; do not overwrite.
+- Accuracy: add a flag/default in `analyze_repertoire_90_accuracy.py` to read the 80-truth instead of `csv/90 preview list.csv`, then rerun accuracy on fresh offline results.
+- Untracked: `csv/test_results_20251120_*.csv` only; no code changes pending besides this doc/truth file.
+- BPM work: untouched this round—feel free to iterate on half/double resolution with tempogram/onset evidence; watch 6/8/dotted cases.
 
 ## Caveats
 - Offline analysis uses `use_tempfile=True` to make `audioread` handle `.m4a` previews; keep that if you refactor.

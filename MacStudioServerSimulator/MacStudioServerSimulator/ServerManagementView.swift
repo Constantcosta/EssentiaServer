@@ -10,8 +10,10 @@ import AppKit
 
 struct ServerManagementView: View {
     @EnvironmentObject var manager: MacStudioServerManager
-    @State private var selectedTab = 0
+    @State private var selectedTab = 2 // Default to Drum Stockpile
     @StateObject private var logStore = LogStore()
+    @StateObject private var stockpileStore = DrumStockpileStore()
+    @StateObject private var stockpilePreview = DrumPreviewEngine()
     
     var body: some View {
         VStack(spacing: 0) {
@@ -22,6 +24,7 @@ struct ServerManagementView: View {
             Picker("View", selection: $selectedTab) {
                 Label("Tests", systemImage: "checklist").tag(0)
                 Label("Logs", systemImage: "doc.text.fill").tag(1)
+                Label("Drum Stockpile", systemImage: "waveform.path").tag(2)
             }
             .pickerStyle(.segmented)
             .padding()
@@ -39,11 +42,18 @@ struct ServerManagementView: View {
                     .opacity(selectedTab == 1 ? 1 : 0)
                     .allowsHitTesting(selectedTab == 1)
                     .id("logs")
+                
+                DrumStockpileView(store: stockpileStore, preview: stockpilePreview)
+                    .opacity(selectedTab == 2 ? 1 : 0)
+                    .allowsHitTesting(selectedTab == 2)
+                    .id("stockpile")
             }
             .animation(.easeInOut(duration: 0.15), value: selectedTab)
         }
         .frame(minWidth: 800, minHeight: 600)
         .task {
+            // Skip server checks when landing on Stockpile; user can switch tabs to trigger status.
+            guard selectedTab != 2 else { return }
             await manager.checkServerStatus()
             if manager.isServerRunning {
                 await manager.fetchServerStats()

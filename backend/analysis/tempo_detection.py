@@ -147,6 +147,7 @@ def _score_tempo_alias_candidates(
         spectral_octave_hint = 0.0
         agreement_bonus = 0.0
         alias_penalty = 0.0
+        sources = entry.get("sources", [])
 
         if is_short_clip:
             detector_vals = [v for v in (percussive_bpm, onset_bpm) if v and v > 0]
@@ -155,9 +156,12 @@ def _score_tempo_alias_candidates(
                 median_val = sorted(detector_vals)[len(detector_vals) // 2]
                 if spread <= 3.0 and abs(bpm_value - median_val) <= 2.0:
                     agreement_bonus = 0.05
-            sources = entry.get("sources", [])
-            if sources and all(abs(src.get("factor", 1.0) - 1.0) > 0.05 for src in sources):
-                alias_penalty = 0.04
+            if sources:
+                has_direct_pick = any(abs(src.get("factor", 1.0) - 1.0) <= 0.05 for src in sources)
+                if not has_direct_pick:
+                    alias_penalty = 0.06
+                    if bpm_value > 170:
+                        alias_penalty += 0.02
 
         base_score = (
             alignment_weight * alignment +
@@ -293,6 +297,59 @@ def _safe_hpss_component(component: Optional[np.ndarray], fallback: np.ndarray) 
     if array.size == 0:
         return np.array(fallback, copy=True)
     return np.ascontiguousarray(array)
+
+
+def _periodicity_score(onset_env: np.ndarray, sr: int, hop_length: int, bpm: float) -> float:
+    """Autocorr-based periodicity score at a target BPM."""
+    if onset_env is None or onset_env.size == 0 or bpm <= 0:
+        return 0.0
+    frames_per_beat = 60.0 * sr / (bpm * hop_length)
+    if frames_per_beat < 2 or frames_per_beat > len(onset_env) * 0.6:
+        return 0.0
+    max_size = int(min(len(onset_env), frames_per_beat * 8))
+    ac = librosa.autocorrelate(onset_env, max_size=max_size)
+    if ac.size == 0 or ac.max() <= 0:
+        return 0.0
+    idx = int(round(frames_per_beat))
+    window = ac[max(idx - 2, 0) : min(idx + 3, len(ac))]
+    strength = float(np.max(window)) if window.size else 0.0
+    return float(np.clip(strength / ac.max(), 0.0, 1.0))
+
+
+def _refine_bpm_with_context(base_bpm: float, onset_perc: np.ndarray, onset_harm: np.ndarray, sr: int, hop_length: int) -> tuple[float, dict]:
+    """
+    Re-score half/double candidates using percussive + harmonic periodicity.
+    Mimics human weighting of drums (pulse) + harmony (bar accents).
+    """
+    candidates: dict[float, dict] = {}
+    for factor in (0.5, 1.0, 1.5, 2.0):
+        cand = base_bpm * factor
+        per_score = _periodicity_score(onset_perc, sr, hop_length, cand)
+        harm_score = _periodicity_score(onset_harm, sr, hop_length, cand)
+        align = tempo_alignment_score(cand)
+        combo = 0.45 * per_score + 0.45 * harm_score + 0.10 * align
+        candidates[cand] = {
+            "percussive": per_score,
+            "harmonic": harm_score,
+            "alignment": align,
+            "score": combo,
+        }
+    best_bpm, best_meta = max(candidates.items(), key=lambda kv: kv[1]["score"])
+    base_meta = candidates.get(base_bpm, {"score": 0.0})
+    improved_enough = best_meta["score"] >= base_meta["score"] * 1.05
+
+    # Guard against halving mid-tempo to sub-70 unless strongly supported
+    is_halving_mid = (best_bpm < 70.0) and (90.0 <= base_bpm <= 140.0)
+    if is_halving_mid:
+        harm_gain = best_meta["harmonic"] - base_meta.get("harmonic", 0.0)
+        perc_gain = best_meta["percussive"] - base_meta.get("percussive", 0.0)
+        strong_support = (best_meta["harmonic"] > 0.82 and best_meta["percussive"] > 0.60)
+        improved_enough = improved_enough and (harm_gain > 0.05 or perc_gain > 0.08 or strong_support)
+
+    if best_bpm != base_bpm and not improved_enough:
+        best_bpm = base_bpm
+        best_meta = base_meta
+    return float(best_bpm), {"candidates": candidates, "chosen": best_meta}
 
 
 def analyze_tempo(
@@ -681,6 +738,94 @@ def analyze_tempo(
                 final_bpm,
                 separation_ratio,
             )
+
+    # Final short-clip alias sanity check: re-score half/double candidates using detector support +
+    # onset separation. This is biased to flip obviously wrong 2x/0.5x picks without hurting true fast songs.
+    if is_short_clip and onset_env is not None and len(onset_env) > 0:
+        def _candidate_score(bpm_val: float) -> float:
+            if bpm_val <= 0 or bpm_val < 45.0 or bpm_val > 190.0:
+                return -1.0
+            alignment = tempo_alignment_score(bpm_val)
+            detector_support = max(
+                _tempo_similarity(bpm_val, tempo_percussive_float),
+                _tempo_similarity(bpm_val, tempo_onset_float),
+                _tempo_similarity(bpm_val, tempo_plp_bpm),
+            )
+            separation = _compute_onset_energy_separation(bpm_val, onset_env, sr, ANALYSIS_HOP_LENGTH) or 0.0
+            sep_score = clamp_to_unit(separation / 3.0)
+            range_bias = 0.0
+            if 80 <= bpm_val <= 130:
+                range_bias = 0.05
+            elif 130 < bpm_val <= 160:
+                range_bias = 0.02
+            elif bpm_val >= 175:
+                range_bias = -0.04
+            return max(0.0, 0.45 * alignment + 0.35 * detector_support + 0.20 * sep_score + range_bias)
+
+        current_score = _candidate_score(final_bpm)
+        best_bpm = final_bpm
+        best_score = current_score
+        improvement_threshold = 1.05
+        prefer_lower_octave = final_bpm >= 150.0
+        if prefer_lower_octave and bpm_confidence < 0.90:
+            improvement_threshold = 1.03
+
+        for factor in (0.5, 0.67, 0.75, 1.0, 1.5, 2.0):
+            test_bpm = final_bpm * factor
+            score = _candidate_score(test_bpm)
+            if score < 0:
+                continue
+            threshold = improvement_threshold
+            if prefer_lower_octave and factor < 1.0:
+                threshold = min(threshold, 0.99)
+            elif prefer_lower_octave and factor > 1.0:
+                threshold = max(threshold, 1.08)
+
+            if score > best_score * threshold:
+                best_bpm = test_bpm
+                best_score = score
+
+        if best_bpm == final_bpm and final_bpm > 155.0:
+            half_bpm = final_bpm * 0.5
+            half_score = _candidate_score(half_bpm)
+            if half_score > current_score * 1.02 and tempo_alignment_score(half_bpm) >= tempo_alignment_score(final_bpm):
+                best_bpm = half_bpm
+                best_score = half_score
+
+        if best_bpm != final_bpm:
+            logger.info(
+                "♻️  Short-clip alias correction: %.1f → %.1f BPM (score %.3f → %.3f)",
+                final_bpm,
+                best_bpm,
+                current_score,
+                best_score,
+            )
+            final_bpm = best_bpm
+            bpm_confidence *= 0.90
+
+    # Harmonic/percussive periodicity refinement for low-confidence or likely alias cases.
+    if onset_env is not None and len(onset_env) > 0 and y_harmonic is not None and y_harmonic.size > 0:
+        needs_refine = (
+            bpm_confidence < 0.85
+            or final_bpm < 70.0
+            or final_bpm > 150.0
+            or (best_alias and best_alias.get("score", 0) < 0.8)
+        )
+        if needs_refine:
+            onset_perc = onset_env
+            onset_harm = librosa.onset.onset_strength(y=y_harmonic, sr=sr, hop_length=ANALYSIS_HOP_LENGTH)
+            refined_bpm, context_meta = _refine_bpm_with_context(final_bpm, onset_perc, onset_harm, sr, ANALYSIS_HOP_LENGTH)
+            if refined_bpm != final_bpm:
+                logger.info(
+                    "🎯 Context BPM refinement: %.1f → %.1f (harmonic/percussive periodicity)",
+                    final_bpm,
+                    refined_bpm,
+                )
+                final_bpm = refined_bpm
+                bpm_confidence = max(bpm_confidence, 0.85)
+                if best_alias is None:
+                    best_alias = {"bpm": refined_bpm}
+                best_alias["context_refine"] = context_meta
 
     beat_consistency = None
     if len(beats) > 0:

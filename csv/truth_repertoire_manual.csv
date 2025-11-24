@@ -1,0 +1,81 @@
+Song,Artist,BPM,Key
+Knew I Loved You,Savage Garden,85,A Major
+Faint,Linkin Park,135,C# Minor
+All Along The Watchtower,Jimi Hendrix,115,C Minor
+Black Tangled Heart,Silverchair,138,E Minor,"Chromatic chords Bb and F major present"
+Señorita,Justin Timberlake,98,Eb Minor,"Harmony is ambiguous/tricky even for humans"
+She Loves You,The Beatles,153,G Major,"Stray Cm appears, mostly G; slightly out of tune (tape)"
+Now And Then,The Beatles,87,E Minor
+Here Comes The Sun,The Beatles,126,A Major,"Includes a B major chord"
+Sunsets,Powderfinger,84,D Major,"Harmonically ambiguous (G and G#); D or A/A7 acceptable"
+Semi-Charmed Life,Third Eye Blind,102,G Major
+Pink Pony Club,Chappell Roan,107,F# Major
+Tequila,Dan + Shay,86,B Major
+Naive,The Kooks,103,B Major,"Consistent A#; analysis may drift toward E"
+Don't Dream It's Over,Crowded House,81,Eb Major
+Better Be Home Soon,Crowded House,93,C Major
+Baby Did A Bad Bad Thing,Chris Isaak,152,E Minor,"G# tension note appears; key is Em"
+Tennessee Whiskey,Chris Stapleton,150,A Major,"6/8 feel: dotted-quarter pulse ~50; eighth-note tempo ~150; accents on 1 & 4 (kick/snare)"
+The King of Wishful Thinking,Go West,108,C Major
+Folsom Prison Blues,Johnny Cash,111,F Major,"Blues harmony with b7s expected (Eb/Ab); labeled F major"
+Peace Train,Yusuf/Cat Stevens,82,C Major
+Blow Up The Pokies,The Whitlams,53,C Major,"6/8 feel: dotted-quarter≈53; eighth-note≈158 (accents on 1 & 4)"
+Beer Never Broke My Heart,Luke Combs,77,C# Major,"C# with sections implying C#7"
+Dance The Night,Dua Lipa,110,B Minor
+Are You Gonna Be My Girl,Jet,108,A Major,"Tempo loose with pause; key ambiguous (root motion in Am, chords parallel major); treated as A"
+Murder On The Dancefloor,Sophie Ellis-Bextor,117,E Major,"Preview leans on iii/ii; A and E chords confirm C#m/E center"
+Good Riddance (Time of Your Life),Green Day,96,G Major,"Preview includes stop/start intro; tempo may read slightly lower"
+3AM,Matchbox Twenty,108,G# Major
+Love Yourself,Justin Bieber,100,E Major
+Betterman,John Butler Trio,107,G Minor,"Preview starts ~111 BPM then settles ~105-106 BPM"
+Rock DJ,Robbie Williams,104,D Major,"Feels D mixolydian/D7; chords C→D, chorus bassline D minorish"
+Hello,Adele,79,F Minor
+"Shit, Damn, Motherfucker",D'Angelo,81,G Major
+"Good Luck, Babe!",Chappell Roan,117,D Major
+Closer,Nine Inch Nails,90,C Mixolydian,"Ambiguous: intro/outro loose C7 (bass hints Cm, melody C7); chorus leans F7/Fsus#11—treat as C7 modal"
+Tomorrow,Silverchair,74,A Major,"Ambiguous harmony: sections feel Am/A7; chords A-C-D; treated as A (mixolydian-ish tension typical of style)"
+Come on over Baby,Christina Aguilera,119,G# Major
+Everlong,Foo Fighters,158,D Major
+Real World,Matchbox Twenty,118,Bb Major
+You Make My Dreams,Daryl Hall & John Oates,167,F Major
+Otherside,Red Hot Chili Peppers,118,A Minor,"Guitar/bass dotted-crotchet figure feels faster; true tempo heard from chord changes and melodic strong beats"
+Karma Police,Radiohead,75,A Minor,"Slides between Am aeolian and dorian (G natural) in preview"
+Slide,The Goo Goo Dolls,112,Ab Major
+Crazy Little Thing Called Love,Queen,153,D Major,"Mostly D major; occasional Bb color in preview"
+Better Man,Pearl Jam,120,D Major,"Verse modal/ambiguous (D/F#, E/G#, F/A, G/B, no drums); chorus solid D around 120"
+Hurt,Johnny Cash,91,A Minor
+Freak On A Leash,Korn,103,D Major,"Modal feel (D to Eb); treat as D"
+Pardon Me,Incubus,152,C# Minor
+Ex-Girlfriend,No Doubt,173,E Minor,"Tempo shift to half-time feel in second half of preview"
+No Diggity,Blackstreet,89,C# Minor
+Around The World,Red Hot Chili Peppers,100,E Minor,"Starts ~105 then settles ~101 with drums; ends on Em→G7#9 modal color"
+Iris,Scary Pockets,110,D Major,"feat. Laura Elliott; includes II7 movement"
+In The Summertime,Thirsty Merc,78,E Major,"Verse riff feels Em7#9 (bluesy), prechorus II7→IV, chorus E major; hats in 16ths can mislead to double-time"
+Find an Island,BENEE,82,D Minor
+2 Become 1,Spice Girls,72,F# Major,"Preview ending introduces outside harmony"
+Still Into You,Paramore,136,F Major
+When You're Gone,Bryan Adams & Melanie C,126,C Major
+Raise Your Glass,P!nk,122,G Major
+Houdini,Dua Lipa,118,D Minor,"Drums slightly behind the beat"
+Escape (The Pina Colada Song),Rupert Holmes,70,C Major,"Half-time feel"
+The Gambler,Kenny Rogers,87,Eb Major
+Khe Sanh,Cold Chisel,174,G Major,"Live recording; tempo wavers"
+Life Is A Highway,Tom Cochrane,103,F Major
+Celebrity Skin,Hole,134,F# Minor
+Raised Like That,James Johnston,111,Db Major
+Last Night,Morgan Wallen,102,F# Major
+Stop,Spice Girls,130,"C Major (Bb tension chord substitution for Em; melody anchored in C)"
+We Are Never... Back Together,Taylor Swift,86,G Major
+Complicated,Avril Lavigne,78,F Major
+4ever,The Veronicas,146,F Minor
+Call Me Maybe,Carly Rae Jepsen,120,G Major
+Everybody Wants To Rule...,Tears For Fears,112,D Major,"Verse uses A/D, G/D; pre-chorus outlines D major (ii, ii, IV, V)"
+Misery Business,Paramore,173,F Minor
+You Belong With Me,Taylor Swift,130,F# Major
+My Heart Will Go On,Celine Dion,50,"E Major (ballad feel)"
+Hallelujah,Jeff Buckley,69,"C Major (6/8; dotted crotchet≈69, quaver≈206)"
+Pretty Fly (For A White Guy),The Offspring,143,B Minor
+Sex & Candy,Marcy Playground,81,"B Minor (tempo ~80-82)"
+Love Story,Taylor Swift,119,D Major
+That Don't Impress Me Much,Shania Twain,125,Bb Minor
+Days Go By,Keith Urban,132,D Major

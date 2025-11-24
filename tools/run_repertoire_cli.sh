@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_FILE="${REPO_ROOT}/reports/repertoire_iterations.log"
 ANALYZE_SCRIPT="${REPO_ROOT}/tools/analyze_repertoire_90.py"
 ACCURACY_SCRIPT="${REPO_ROOT}/analyze_repertoire_90_accuracy.py"
+TRUTH_CSV="${REPO_ROOT}/csv/truth_repertoire_manual.csv"
 
 cd "${REPO_ROOT}"
 
@@ -36,6 +37,6 @@ echo "▶️  Running repertoire analysis via ${ANALYZE_SCRIPT}"
 .venv/bin/python "${ANALYZE_SCRIPT}" --csv-auto "${analysis_args[@]}"
 
 echo "▶️  Computing accuracy and appending to ${LOG_FILE}"
-.venv/bin/python "${ACCURACY_SCRIPT}" --log --log-file "${LOG_FILE}"
+.venv/bin/python "${ACCURACY_SCRIPT}" --truth-csv "${TRUTH_CSV}" --log --log-file "${LOG_FILE}"
 
 echo "✅ Repertoire iteration complete. Log updated at ${LOG_FILE}"

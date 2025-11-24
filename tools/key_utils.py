@@ -13,6 +13,12 @@ MODE_ALIASES = {
     "min": "minor",
     "minor": "minor",
     "aeolian": "minor",
+    "mixolydian": "mixolydian",
+    "mixo": "mixolydian",
+    "lydian": "lydian",
+    "dorian": "dorian",
+    "phrygian": "phrygian",
+    "locrian": "locrian",
 }
 
 
@@ -57,14 +63,23 @@ def normalize_key_label(label: Optional[str]) -> Optional[Tuple[int, str]]:
         return None
 
     # Detect mode before stripping mode tokens
-    mode = "major"
+    mode: Optional[str] = None
     raw_tokens = text.replace("/", " ").split()
     if any(tok in MODE_ALIASES for tok in raw_tokens):
         for tok in raw_tokens:
             if tok in MODE_ALIASES:
                 mode = MODE_ALIASES[tok]
-    elif text.endswith("m"):
+                break
+    if mode is None:
+        # Fallback: if the mode token is attached to the tonic (e.g., "cmixolydian")
+        for token, canonical in MODE_ALIASES.items():
+            if token in text:
+                mode = canonical
+                break
+    if mode is None and text.endswith("m"):
         mode = "minor"
+    if mode is None:
+        mode = "major"
 
     # Remove mode markers to leave only the tonic spelling
     for alias in sorted(MODE_ALIASES.keys(), key=len, reverse=True):
@@ -120,7 +135,12 @@ def format_canonical_key(root_index: int, mode: str, prefer_flats: bool = False)
     flats = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
     names = flats if prefer_flats else sharps
     root = names[root_index % 12]
-    suffix = "minor" if mode == "minor" else "major"
+    if mode == "minor":
+        suffix = "minor"
+    elif mode == "major":
+        suffix = "major"
+    else:
+        suffix = mode
     return f"{root} {suffix}"
 
 
@@ -129,11 +149,13 @@ def keys_match_fuzzy(key1: Optional[str], key2: Optional[str]) -> Tuple[bool, st
     Compare two keys with enharmonic matching.
     
     Returns:
-        (match: bool, reason: str) - True if keys match exactly or are enharmonic equivalents
+        (match: bool, reason: str) - True if keys match exactly or are enharmonic (or relative) equivalents
     
     Matching rules:
     1. Exact match (e.g., "D# Minor" == "D# Minor")
     2. Enharmonic equivalent (e.g., "D# Minor" == "Eb Minor", "G#/Ab" == "Ab")
+    3. Relative major/minor (e.g., "C Major" == "A Minor")
+    4. Major vs mixolydian sharing the same pitch material (e.g., "F Major" == "C Mixolydian")
     """
     if not key1 or not key2:
         return (False, "missing key")
@@ -154,6 +176,20 @@ def keys_match_fuzzy(key1: Optional[str], key2: Optional[str]) -> Tuple[bool, st
         if canonical1 == canonical2:
             return (True, "exact")
         return (True, "enharmonic")
+
+    # Relative major/minor share pitch material: major tonic is +3 semitones above its relative minor
+    if {mode1, mode2} == {"major", "minor"}:
+        major_root = root1 if mode1 == "major" else root2
+        minor_root = root1 if mode1 == "minor" else root2
+        if (major_root - minor_root) % 12 == 3:
+            return (True, "relative major/minor")
+
+    # Mixolydian on the dominant shares notes with the major scale a fourth above.
+    if (
+        (mode1 == "mixolydian" and mode2 == "major" and (root1 + 5) % 12 == root2)
+        or (mode2 == "mixolydian" and mode1 == "major" and (root2 + 5) % 12 == root1)
+    ):
+        return (True, "relative mixolydian/major")
 
     return (False, "different")
 

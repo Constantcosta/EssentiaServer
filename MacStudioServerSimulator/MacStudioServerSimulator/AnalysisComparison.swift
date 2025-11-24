@@ -111,6 +111,16 @@ struct TestCExpectedReference {
 /// Utilities for comparing analysis results with Spotify reference
 class ComparisonEngine {
     
+    private enum MusicalMode: String {
+        case major
+        case minor
+        case mixolydian
+        case dorian
+        case lydian
+        case phrygian
+        case locrian
+    }
+    
     /// Compare BPM with tolerance and octave detection
     static func compareBPM(analyzed: Int?, spotify: Int?) -> MetricMatch {
         guard let analyzed = analyzed, let spotify = spotify else {
@@ -162,7 +172,7 @@ class ComparisonEngine {
             return .unavailable
         }
 
-        if parsedAnalyzed == parsedReference {
+        if keysEquivalent(parsedAnalyzed, parsedReference) {
             return .match
         }
 
@@ -175,7 +185,31 @@ class ComparisonEngine {
     /// Parsed canonical representation of a key.
     private struct ParsedKey: Equatable {
         let pitchClass: Int   // 0–11
-        let mode: String      // "major" | "minor"
+        let mode: MusicalMode // "major", "minor", "mixolydian", etc.
+    }
+    
+    /// Determine if two parsed keys share the same pitch material (exact, relative, or modal equivalence).
+    private static func keysEquivalent(_ lhs: ParsedKey, _ rhs: ParsedKey) -> Bool {
+        if lhs == rhs {
+            return true
+        }
+        
+        // Relative major/minor: major tonic is +3 semitones above its relative minor.
+        if (lhs.mode == .major && rhs.mode == .minor) || (lhs.mode == .minor && rhs.mode == .major) {
+            let majorRoot = lhs.mode == .major ? lhs.pitchClass : rhs.pitchClass
+            let minorRoot = lhs.mode == .minor ? lhs.pitchClass : rhs.pitchClass
+            if (majorRoot - minorRoot + 12) % 12 == 3 {
+                return true
+            }
+        }
+        
+        // Mixolydian on the dominant shares the pitch set of the major scale a fourth above.
+        if (lhs.mode == .mixolydian && rhs.mode == .major && (lhs.pitchClass + 5) % 12 == rhs.pitchClass) ||
+            (rhs.mode == .mixolydian && lhs.mode == .major && (rhs.pitchClass + 5) % 12 == lhs.pitchClass) {
+            return true
+        }
+        
+        return false
     }
     
     /// Convert a key string into a canonical pitch class + mode, handling enharmonic spellings.
@@ -189,17 +223,36 @@ class ComparisonEngine {
 
         guard !cleaned.isEmpty else { return nil }
 
-        var mode = "major"
-        if cleaned.contains("minor") || cleaned.contains("min") || cleaned.hasSuffix("m") {
-            mode = "minor"
+        let modeTokens: [(String, MusicalMode)] = [
+            ("mixolydian", .mixolydian),
+            ("mixo", .mixolydian),
+            ("lydian", .lydian),
+            ("dorian", .dorian),
+            ("phrygian", .phrygian),
+            ("locrian", .locrian),
+            ("aeolian", .minor),
+            ("minor", .minor),
+            ("min", .minor),
+            ("ionian", .major),
+            ("major", .major),
+            ("maj", .major)
+        ]
+        
+        var mode: MusicalMode = .major
+        for (token, tokenMode) in modeTokens {
+            if cleaned.contains(token) {
+                mode = tokenMode
+                break
+            }
+        }
+        if mode == .major && cleaned.hasSuffix("m") {
+            mode = .minor
         }
 
         // Strip mode markers to isolate the tonic spelling
-        cleaned = cleaned
-            .replacingOccurrences(of: "minor", with: "")
-            .replacingOccurrences(of: "major", with: "")
-            .replacingOccurrences(of: "maj", with: "")
-            .replacingOccurrences(of: "min", with: "")
+        for (token, _) in modeTokens {
+            cleaned = cleaned.replacingOccurrences(of: token, with: "")
+        }
         if cleaned.hasSuffix("m") { cleaned.removeLast() }
         cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return nil }

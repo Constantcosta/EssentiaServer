@@ -357,6 +357,7 @@ struct RepertoireComparisonTab: View {
         .padding(12)
         .task {
             await controller.loadDefaultSpotify()
+            await controller.loadDefaultTruth()
             await controller.loadDefaultBpmReferences()
             await controller.loadDefaultFolder()
         }
@@ -458,6 +459,12 @@ struct RepertoireComparisonTab: View {
                 Task { await controller.reloadSpotify() }
             } label: {
                 Label("Reload Spotify CSV", systemImage: "arrow.clockwise")
+            }
+            
+            Button {
+                Task { await controller.reloadTruth() }
+            } label: {
+                Label("Reload Truth CSV", systemImage: "arrow.triangle.2.circlepath")
             }
             
             Spacer()
@@ -806,7 +813,10 @@ struct RepertoireRow: Identifiable {
     }
     
     private var truthBpmCandidates: [Double] {
-        [
+        if let truth = spotify?.truthBpm {
+            return [truth]
+        }
+        return [
             spotify?.googleBpm,
             spotify?.deezerApiBpm,
             spotify?.deezerBpm,
@@ -841,6 +851,9 @@ struct RepertoireRow: Identifiable {
     
     var truthConfidenceLabel: String? {
         guard !truthBpmCandidates.isEmpty else { return nil }
+        if spotify?.truthBpm != nil {
+            return "Manual truth"
+        }
         let spread = (truthBpmCandidates.max() ?? 0) - (truthBpmCandidates.min() ?? 0)
         if truthBpmCandidates.count <= 1 {
             return "Low confidence"
@@ -856,6 +869,7 @@ struct RepertoireRow: Identifiable {
     var truthConfidenceColor: Color {
         guard let label = truthConfidenceLabel else { return .secondary }
         switch label {
+        case "Manual truth": return .green
         case "High confidence": return .green
         case "Medium confidence": return .orange
         case "Low confidence": return .red
@@ -1020,8 +1034,10 @@ struct RepertoireSpotifyTrack: Identifiable {
     var deezerBpm: Double?
     var deezerApiBpm: Double?
     let googleKey: String?
-    let truthKey: String?
+    var truthKey: String?
     let keyQuality: String?
+    var truthBpm: Double?
+    var truthNotes: String?
     
     var bpmText: String {
         String(format: "%.0f", bpm)
@@ -1163,7 +1179,9 @@ enum RepertoireSpotifyParser {
                     deezerApiBpm: nil,
                     googleKey: googleKey,
                     truthKey: truthKey,
-                    keyQuality: keyQuality
+                    keyQuality: keyQuality,
+                    truthBpm: nil,
+                    truthNotes: nil
                 )
             )
         }
