@@ -71,9 +71,17 @@ extension ServerStats {
         cacheHits = try container.decode(Int.self, forKey: .cacheHits)
         cacheMisses = try container.decode(Int.self, forKey: .cacheMisses)
         lastUpdated = try container.decodeIfPresent(String.self, forKey: .lastUpdated)
-        cacheHitRate = try container.decode(String.self, forKey: .cacheHitRate)
         totalCachedSongs = try container.decodeIfPresent(Int.self, forKey: .totalCachedSongs)
         databasePath = try container.decodeIfPresent(String.self, forKey: .databasePath)
+        
+        // Handle cache_hit_rate which can be Double (from server) or String
+        if let rateDouble = try? container.decode(Double.self, forKey: .cacheHitRate) {
+            cacheHitRate = String(format: "%.1f%%", rateDouble * 100)
+        } else if let rateString = try? container.decode(String.self, forKey: .cacheHitRate) {
+            cacheHitRate = rateString
+        } else {
+            cacheHitRate = "0%"
+        }
     }
     
     nonisolated func encode(to encoder: Encoder) throws {
