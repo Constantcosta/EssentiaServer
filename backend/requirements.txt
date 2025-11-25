@@ -3,9 +3,13 @@ flask-cors==4.0.0
 librosa==0.10.1
 requests==2.31.0
 numpy==1.26.0
+essentia==2.1b6.dev1389
+resampy==0.4.3
 flask
 flask-cors
 librosa
 numpy
 requests
 pydub
+pandas==2.1.2
+pyarrow==14.0.1

@@ -88,6 +88,33 @@ extension ServerStats {
     }
 }
 
+extension ServerStats {
+    var cacheHitRatePercentage: Double? {
+        normalizedHitRateValue(cacheHitRate)
+    }
+    
+    var cacheHitRateFormatted: String {
+        guard let percentage = cacheHitRatePercentage else {
+            return cacheHitRate
+        }
+        return String(format: "%.1f%%", percentage * 100)
+    }
+}
+
+private func normalizedHitRateValue(_ rawValue: String) -> Double? {
+    let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    
+    let cleaned = trimmed.replacingOccurrences(of: "%", with: "")
+    guard let numeric = Double(cleaned) else { return nil }
+    
+    if trimmed.contains("%") || numeric > 1 {
+        return numeric / 100
+    }
+    
+    return numeric
+}
+
 struct CachedAnalysis: Identifiable, Sendable, Codable {
     let id: Int
     let title: String

@@ -5,7 +5,7 @@ A self-improving music analysis database that runs on your Mac Studio and integr
 ## What This Does
 
 Your Mac Studio becomes an **intelligent caching server** that:
-- ✅ Auto-analyzes 95% of songs accurately (30-sec previews are fine for chorus tempo)
+- ✅ Auto-analyzes full tracks and cross-checks overlapping 15s windows for steadier tempo/key detection
 - ✅ Lets you manually verify/correct the 5% that are complex
 - ✅ Grows smarter over time with your corrections
 - ✅ Works for YOUR music catalog forever
@@ -14,36 +14,54 @@ Your Mac Studio becomes an **intelligent caching server** that:
 
 ## Quick Start (2 minutes)
 
-### One-Command Setup
+### Recommended: Virtual Environment Setup
+
+For best results, use a Python virtual environment to ensure all dependencies (especially Essentia) are properly installed:
 
 ```bash
-cd mac-studio-server/
-./setup_and_run.sh
+# Navigate to the repository root
+cd /path/to/EssentiaServer
 
-# Install required packages
-pip3 install flask flask-cors librosa requests numpy
+# Create virtual environment
+python3 -m venv .venv
 
-# Or use requirements.txt
-cat > requirements.txt << EOF
-flask>=2.3.0
-flask-cors>=4.0.0
-librosa>=0.10.0
-requests>=2.31.0
-numpy>=1.24.0
-soundfile>=0.12.0
-EOF
+# Activate virtual environment
+source .venv/bin/activate
 
-pip3 install -r requirements.txt
+# Install all dependencies (including Essentia)
+pip install -r backend/requirements.txt
+
+# Run the server using the virtual environment
+.venv/bin/python backend/analyze_server.py
 ```
 
-### 2. Download Server Script
+**Note:** The Mac GUI app will automatically detect and use the virtual environment at `.venv/bin/python` if it exists, and `backend/analyze_server.py` now refuses to launch outside that venv unless you explicitly set `ALLOW_SYSTEM_PYTHON=1`.
+We pin `resampy` alongside `librosa`, so you'll no longer see the "Global resample ... failed (No module named 'resampy')" warning once the requirements install completes.
 
-Copy `analyze_server.py` to this directory.
+### Alternative: System Python Setup
 
-### 3. Run the Server
+If you prefer to use system Python (not recommended for Essentia support), you must opt in explicitly:
 
 ```bash
+cd backend/
+
+# Install required packages
+pip3 install -r requirements.txt
+
+# Allow system Python just for this invocation
+export ALLOW_SYSTEM_PYTHON=1
+
+# Run the server
 python3 analyze_server.py
+```
+
+### Using the Setup Script
+
+The automated setup script will prefer the virtual environment if it exists:
+
+```bash
+cd backend/
+./setup_and_run.sh
 ```
 
 You should see:
@@ -121,7 +139,7 @@ POST http://your-mac-studio.local:5050/analyze
 Content-Type: application/json
 
 {
-  "url": "https://audio-ssl.itunes.apple.com/...",
+  "audio_url": "https://audio-ssl.itunes.apple.com/...",
   "title": "Bohemian Rhapsody",
   "artist": "Queen"
 }
@@ -166,13 +184,19 @@ Response:
 
 ### Search Cache
 ```bash
-GET http://your-mac-studio.local:5000/cache/search?artist=Queen&title=Bohemian
+GET http://your-mac-studio.local:5000/cache/search?q=Queen
 
 Response:
-{
-  "count": 1,
-  "songs": [...]
-}
+[
+  {
+    "title": "...",
+    "artist": "...",
+    "bpm": 120.0,
+    "key": "C Major",
+    "analyzed_at": "2025-11-14T20:20:20",
+    ...
+  }
+]
 ```
 
 ### Export All Data
@@ -180,6 +204,55 @@ Response:
 GET http://your-mac-studio.local:5000/cache/export
 
 Downloads entire catalog as JSON
+```
+
+## Test Scripts
+
+Two lightweight Python scripts keep the analysis helpers and HTTP surface healthy. Run them from the repo root:
+
+```bash
+python3 backend/test_phase1_features.py     # Validates feature helpers via synthetic audio
+python3 backend/test_server.py              # Hits the Flask endpoints
+python3 backend/performance_test.py         # Benchmarks DB optimizations (optional)
+```
+
+`test_phase1_features.py` synthesizes a metered audio clip, asserts deterministic mood mapping, and verifies silence handling. It only depends on `librosa`/`numpy`.
+
+`test_server.py` talks to a running server. Configure targets via environment variables:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `TEST_SERVER_URL` | Override base URL (otherwise uses `MAC_STUDIO_SERVER_HOST/PORT`). | `http://localhost:5050` |
+| `TEST_CACHE_NAMESPACE` | Namespace used for cache/search/analyze payloads. | `default` |
+| `TEST_CACHE_MIN_RESULTS` | Minimum acceptable cache rows (fail if fewer). | `0` |
+| `TEST_CACHE_QUERY` | Search query for `/cache/search`. | `""` |
+| `TEST_ANALYZE_URL` | Preview URL to submit to `/analyze`. Use a valid one to expect HTTP 200. | Invalid placeholder |
+| `TEST_ANALYZE_ACCEPTABLE_STATUS` | Comma-separated list of HTTP codes that count as pass for `/analyze`. | `200,500,502` |
+| `TEST_ANALYZE_TIMEOUT` | Seconds before the analyze request times out. | `30` |
+
+Example (expecting a download failure but successful health/cache coverage):
+
+```bash
+TEST_ANALYZE_ACCEPTABLE_STATUS=502 python3 backend/test_server.py
+```
+
+## Performance Tuning
+
+Control server throughput without editing code by exporting environment variables before launching `analyze_server.py`:
+
+- `ANALYSIS_SAMPLE_RATE` (default `22050`) – every waveform is globally resampled to this rate; lower values slash FFT cost while keeping tonal content for calibration runs. Use `ANALYSIS_RESAMPLE_TYPE` to choose the librosa resampler (`kaiser_fast`, `sinc_best`, etc.).
+- `KEY_ANALYSIS_SAMPLE_RATE` – independent down-sampling target for the key detector (kept at 22.05 kHz by default).
+- `ANALYSIS_WORKERS` (default `2`) – number of parallel `ProcessPoolExecutor` workers. Set to `0` to force single-process mode.
+- `CHUNK_ANALYSIS_SECONDS`, `CHUNK_OVERLAP_SECONDS`, and `MAX_CHUNK_BATCHES` – control window length, hop size, and the maximum number of chunk analyses. Set `CHUNK_ANALYSIS_ENABLED=false` (or send header `X-Skip-Chunk-Analysis: true`) to skip chunk sweeps entirely during calibration throughput tests.
+- `MAX_ANALYSIS_SECONDS` – trim the incoming audio before analysis if you only need the intro.
+
+Example:
+
+```bash
+export ANALYSIS_SAMPLE_RATE=22050
+export ANALYSIS_WORKERS=4
+export CHUNK_ANALYSIS_ENABLED=false
+python3 analyze_server.py
 ```
 
 ## How It Grows Over Time

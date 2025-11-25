@@ -115,9 +115,17 @@ class MacStudioServerManager: ObservableObject {
     
     // MARK: - Cache Management
     
-    func fetchCachedAnalyses(limit: Int = 100, offset: Int = 0) async {
-        isLoading = true
+    func fetchCachedAnalyses(limit: Int = 100, offset: Int = 0, showLoadingIndicator: Bool = true) async {
+        if showLoadingIndicator {
+            isLoading = true
+        }
         errorMessage = nil
+        
+        defer {
+            if showLoadingIndicator {
+                isLoading = false
+            }
+        }
         
         do {
             guard let url = URL(string: "\(baseURL)/cache?limit=\(limit)&offset=\(offset)") else { return }
@@ -125,16 +133,22 @@ class MacStudioServerManager: ObservableObject {
             request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
             let (data, _) = try await URLSession.shared.data(for: request)
             cachedAnalyses = try JSONDecoder().decode([CachedAnalysis].self, from: data)
-            isLoading = false
         } catch {
             errorMessage = "Failed to fetch cache: \(error.localizedDescription)"
-            isLoading = false
         }
     }
     
-    func searchCache(query: String) async {
-        isLoading = true
+    func searchCache(query: String, showLoadingIndicator: Bool = true) async {
+        if showLoadingIndicator {
+            isLoading = true
+        }
         errorMessage = nil
+        
+        defer {
+            if showLoadingIndicator {
+                isLoading = false
+            }
+        }
         
         do {
             guard let url = URL(string: "\(baseURL)/cache/search?q=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") else { return }
@@ -142,10 +156,8 @@ class MacStudioServerManager: ObservableObject {
             request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
             let (data, _) = try await URLSession.shared.data(for: request)
             cachedAnalyses = try JSONDecoder().decode([CachedAnalysis].self, from: data)
-            isLoading = false
         } catch {
             errorMessage = "Failed to search cache: \(error.localizedDescription)"
-            isLoading = false
         }
     }
     

@@ -1,14 +1,53 @@
 #!/usr/bin/env python3
 """
-Quick test script for Mac Studio Audio Analysis Server
-Tests the server endpoints and validates functionality
+Quick regression test suite for the Mac Studio Audio Analysis Server.
+
+This script can be pointed at either a locally running server or a remote
+instance via TEST_SERVER_URL / MAC_STUDIO_SERVER_HOST / PORT. It exercises the
+health, statistics, analysis, and cache endpoints with lightweight assertions.
 """
 
-import requests
-import json
-from datetime import datetime
+from __future__ import annotations
 
-BASE_URL = "http://localhost:5001"
+import os
+import requests
+from datetime import datetime
+from typing import Sequence
+
+
+def _resolve_base_url() -> str:
+    explicit = os.environ.get("TEST_SERVER_URL")
+    if explicit:
+        return explicit.rstrip("/")
+    host = os.environ.get("MAC_STUDIO_SERVER_HOST", "localhost")
+    port = os.environ.get("MAC_STUDIO_SERVER_PORT", "5050")
+    return f"http://{host}:{port}"
+
+
+BASE_URL = _resolve_base_url()
+CACHE_MIN_RESULTS = int(os.environ.get("TEST_CACHE_MIN_RESULTS", "0"))
+CACHE_NAMESPACE = os.environ.get("TEST_CACHE_NAMESPACE", "default")
+CACHE_QUERY = os.environ.get("TEST_CACHE_QUERY", "")
+ANALYZE_URL = os.environ.get(
+    "TEST_ANALYZE_URL",
+    "https://invalid.invalid/nonexistent-audio-file.m4a",
+)
+ANALYZE_TITLE = os.environ.get("TEST_ANALYZE_TITLE", "Connectivity Test")
+ANALYZE_ARTIST = os.environ.get("TEST_ANALYZE_ARTIST", "Test Harness")
+ANALYZE_ACCEPTABLE_STATUS = {
+    int(code.strip())
+    for code in os.environ.get("TEST_ANALYZE_ACCEPTABLE_STATUS", "200,500,502").split(",")
+    if code.strip()
+}
+ANALYZE_TIMEOUT = int(os.environ.get("TEST_ANALYZE_TIMEOUT", "30"))
+
+REQUIRED_CACHE_FIELDS: Sequence[str] = (
+    "title",
+    "artist",
+    "bpm",
+    "key",
+    "analyzed_at",
+)
 
 def print_section(title):
     print("\n" + "="*60)
@@ -60,37 +99,43 @@ def test_stats():
         return False
 
 def test_analyze():
-    """Test analysis endpoint with a sample preview"""
+    """Test analysis endpoint with a controllable payload."""
     print_section("3. Testing Audio Analysis (Sample)")
-    
-    # Using a generic test URL format
-    test_data = {
-        "url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview112/v4/test.m4a",
-        "title": "Test Song",
-        "artist": "Test Artist"
+
+    payload = {
+        "audio_url": ANALYZE_URL,
+        # Legacy field name still used by older builds:
+        "url": ANALYZE_URL,
+        "title": ANALYZE_TITLE,
+        "artist": ANALYZE_ARTIST,
+        "cache_namespace": CACHE_NAMESPACE,
     }
-    
-    print(f"   Testing with: '{test_data['title']}' by {test_data['artist']}")
-    print(f"   Note: This is a connectivity test. Actual analysis requires valid preview URLs.")
-    
+
+    print(f"   Testing with: '{payload['title']}' by {payload['artist']}")
+    print("   Note: Set TEST_ANALYZE_URL to a valid preview to expect HTTP 200.")
+
     try:
         response = requests.post(
             f"{BASE_URL}/analyze",
-            json=test_data,
-            timeout=30
+            json=payload,
+            timeout=ANALYZE_TIMEOUT
         )
-        
-        if response.status_code == 200:
+
+        status = response.status_code
+        if status == 200:
             data = response.json()
-            print(f"✅ Analysis endpoint is working!")
-            print(f"   Response structure validated")
+            for field in ("bpm", "key", "analysis_duration"):
+                assert field in data, f"Missing '{field}' in analysis response"
+            print("✅ Analysis endpoint returned success with full payload.")
+            return True
+        if status in ANALYZE_ACCEPTABLE_STATUS:
+            print(f"⚠️  Endpoint responded with HTTP {status}, which is acceptable for this payload.")
+            print(f"   Response: {response.text[:200]}...")
             return True
         else:
-            # This is expected for a test URL - we're just checking the endpoint works
-            print(f"⚠️  Endpoint responded (status {response.status_code})")
-            print(f"   This is normal for a test URL - endpoint is accessible")
-            return True
-            
+            print(f"❌ Unexpected status code {status} from /analyze")
+            print(f"   Body: {response.text}")
+            return False
     except Exception as e:
         print(f"❌ Error: {str(e)}")
         return False
@@ -101,20 +146,23 @@ def test_cache_search():
     try:
         response = requests.get(
             f"{BASE_URL}/cache/search",
-            params={"artist": "", "title": ""},
+            params={"q": CACHE_QUERY, "namespace": CACHE_NAMESPACE},
             timeout=5
         )
         if response.status_code == 200:
             data = response.json()
-            print(f"✅ Cache search working!")
-            print(f"   Found {data.get('count', 0)} songs in cache")
-            
-            if data.get('count', 0) > 0:
-                print("\n   Recent songs:")
-                for song in data.get('songs', [])[:3]:
-                    print(f"   - {song.get('title')} by {song.get('artist')}")
-                    print(f"     {int(song.get('bpm', 0))} BPM | {song.get('key', 'Unknown')} key")
-            
+            assert isinstance(data, list), "Cache search should return a list of songs"
+            count = len(data)
+            print(f"✅ Cache search working! Found {count} songs")
+            if count < CACHE_MIN_RESULTS:
+                print(f"❌ Expected at least {CACHE_MIN_RESULTS} cached songs, found {count}")
+                return False
+            for song in data[:3]:
+                for field in REQUIRED_CACHE_FIELDS:
+                    assert field in song, f"Cache result missing '{field}' field"
+                bpm = song.get('bpm')
+                bpm_label = f"{int(bpm)} BPM" if isinstance(bpm, (int, float)) else "BPM unknown"
+                print(f"   - {song.get('title')} by {song.get('artist')} | {bpm_label} | {song.get('key', 'Unknown')} key")
             return True
         else:
             print(f"❌ Failed with status code: {response.status_code}")
