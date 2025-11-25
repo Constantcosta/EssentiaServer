@@ -1,0 +1,49 @@
+name: DrumGatePlugin
+options:
+  bundleIdPrefix: com.essentia.drumgate
+packages:
+  DrumGateCore:
+    path: ../DrumGateCore
+targets:
+  DrumGateHost:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: Host
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.essentia.drumgate.host
+    dependencies:
+      - package: DrumGateCore
+      - target: DrumGateAudioUnit
+        embed: true
+    info:
+      path: Host/Info.plist
+      properties:
+        NSPrincipalClass: NSApplication
+        NSMicrophoneUsageDescription: "Drum Gate Host needs microphone access to test the plugin."
+  DrumGateAudioUnit:
+    type: app-extension
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: AudioUnit
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.essentia.drumgate.plugin
+      SUPPORTED_PLATFORMS: macosx
+    dependencies:
+      - package: DrumGateCore
+    info:
+      path: AudioUnit/Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.AudioUnit-Plugin
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).DrumGateAudioUnitFactory"
+          NSExtensionAttributes:
+            AudioComponents:
+              - type: aufx
+                subtype: DGTE
+                manufacturer: ESNT
+                name: "Drum Gate"
+                version: 1
+                factoryFunction: DrumGateAudioUnitFactory

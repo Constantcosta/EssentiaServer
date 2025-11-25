@@ -8,12 +8,27 @@
 import SwiftUI
 import AppKit
 
+private enum ManagementTab: Int {
+    case tests = 0
+    case logs = 1
+    case stockpile = 2
+}
+
 struct ServerManagementView: View {
-    @EnvironmentObject var manager: MacStudioServerManager
-    @State private var selectedTab = 2 // Default to Drum Stockpile
+    @ObservedObject var manager: MacStudioServerManager
+    @State private var selectedTab: ManagementTab = .stockpile
+    @State private var selectedTestsMode: TestsTabMode = .repertoire
     @StateObject private var logStore = LogStore()
     @StateObject private var stockpileStore = DrumStockpileStore()
     @StateObject private var stockpilePreview = DrumPreviewEngine()
+    @StateObject private var testRunner = ABCDTestRunner()
+    @StateObject private var repertoireController: RepertoireAnalysisController
+    @StateObject private var repertoireAudioPlayer = RepertoireAudioPlayer()
+    
+    init(manager: MacStudioServerManager) {
+        self.manager = manager
+        _repertoireController = StateObject(wrappedValue: RepertoireAnalysisController(manager: manager))
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -22,38 +37,35 @@ struct ServerManagementView: View {
             Divider()
             
             Picker("View", selection: $selectedTab) {
-                Label("Tests", systemImage: "checklist").tag(0)
-                Label("Logs", systemImage: "doc.text.fill").tag(1)
-                Label("Drum Stockpile", systemImage: "waveform.path").tag(2)
+                Label("Tests", systemImage: "checklist").tag(ManagementTab.tests)
+                Label("Logs", systemImage: "doc.text.fill").tag(ManagementTab.logs)
+                Label("Drum Stockpile", systemImage: "waveform.path").tag(ManagementTab.stockpile)
             }
             .pickerStyle(.segmented)
             .padding()
             
-            // Keep both tabs alive and only toggle visibility.
-            // This preserves in-progress work (e.g. Repertoire analysis)
-            // and scroll positions while you switch between Tests and Logs.
-            ZStack {
-                TestsTab(manager: manager)
-                    .opacity(selectedTab == 0 ? 1 : 0)
-                    .allowsHitTesting(selectedTab == 0)
-                    .id("tests")
-                
-                LogsTab(logStore: logStore)
-                    .opacity(selectedTab == 1 ? 1 : 0)
-                    .allowsHitTesting(selectedTab == 1)
-                    .id("logs")
-                
-                DrumStockpileView(store: stockpileStore, preview: stockpilePreview)
-                    .opacity(selectedTab == 2 ? 1 : 0)
-                    .allowsHitTesting(selectedTab == 2)
-                    .id("stockpile")
+            Group {
+                switch selectedTab {
+                case .tests:
+                    TestsTab(
+                        manager: manager,
+                        testRunner: testRunner,
+                        selectedMode: $selectedTestsMode,
+                        repertoireController: repertoireController,
+                        audioPlayer: repertoireAudioPlayer
+                    )
+                case .logs:
+                    LogsTab(logStore: logStore)
+                case .stockpile:
+                    DrumStockpileView(store: stockpileStore, preview: stockpilePreview)
+                }
             }
             .animation(.easeInOut(duration: 0.15), value: selectedTab)
         }
         .frame(minWidth: 800, minHeight: 600)
         .task {
             // Skip server checks when landing on Stockpile; user can switch tabs to trigger status.
-            guard selectedTab != 2 else { return }
+            guard selectedTab != .stockpile else { return }
             await manager.checkServerStatus()
             if manager.isServerRunning {
                 await manager.fetchServerStats()

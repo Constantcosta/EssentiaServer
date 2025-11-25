@@ -97,6 +97,30 @@ final class DrumStockpileStore: ObservableObject {
         persistState()
     }
     
+    func markAllReviewed() {
+        groups = groups.map { group in
+            var g = group
+            g.reviewed = true
+            return g
+        }
+        persistState()
+    }
+    
+    func markAllUnreviewed() {
+        groups = groups.map { group in
+            var g = group
+            g.reviewed = false
+            return g
+        }
+        persistState()
+    }
+    
+    func setHighConfidenceOverride(_ value: Bool?, for groupID: UUID) {
+        guard let idx = groups.firstIndex(where: { $0.id == groupID }) else { return }
+        groups[idx].highConfidenceOverride = value
+        persistState()
+    }
+    
     func renameGroup(_ groupID: UUID, to newName: String) {
         guard let idx = groups.firstIndex(where: { $0.id == groupID }) else { return }
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)

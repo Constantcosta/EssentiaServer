@@ -51,7 +51,7 @@ class ABCDTestRunner: ObservableObject {
     @Published var results: [ABCDTestType: ABCDTestResult] = [:]
     @Published var outputLines: [String] = []
     
-    private let projectPath: String
+    let projectPath: String
     
     init() {
         // Get project path - need to go to EssentiaServer root
@@ -224,120 +224,6 @@ class ABCDTestRunner: ObservableObject {
         currentTest = nil
     }
     
-    private func stripANSICodes(from text: String) -> String {
-        let pattern = "\u{001B}\\[[0-9;]*m"
-        return text.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
-    }
-    
-    private func extractAnalysisResults(from output: String) -> [AnalysisResult] {
-        let cleanOutput = stripANSICodes(from: output).replacingOccurrences(of: "\r", with: "\n")
-        guard let regex = try? NSRegularExpression(
-            pattern: #"\s*\d+\.\s+(.+?)\s+\|\s+BPM:\s*([\d.]+|N/A)\s+\|\s+Key:\s*([^|]+?)\s+\|"#,
-            options: [.caseInsensitive]
-        ) else {
-            return []
-        }
-        let range = NSRange(cleanOutput.startIndex..<cleanOutput.endIndex, in: cleanOutput)
-        var results: [AnalysisResult] = []
-        regex.enumerateMatches(in: cleanOutput, options: [], range: range) { match, _, _ in
-        guard let match = match,
-            let songRange = Range(match.range(at: 1), in: cleanOutput),
-                  let bpmRange = Range(match.range(at: 2), in: cleanOutput),
-                  let keyRange = Range(match.range(at: 3), in: cleanOutput) else { return }
-        let rawSong = String(cleanOutput[songRange]).trimmingCharacters(in: .whitespaces)
-        let song = cleanSongTitle(rawSong)
-            let bpmString = String(cleanOutput[bpmRange]).trimmingCharacters(in: .whitespaces)
-            let keyString = String(cleanOutput[keyRange]).trimmingCharacters(in: .whitespaces)
-            let bpmValue: Int? = {
-                if let bpmDouble = Double(bpmString) {
-                    return Int(round(bpmDouble))
-                }
-                return nil
-            }()
-            let keyValue = keyString.isEmpty || keyString == "N/A" ? nil : keyString
-            let result = AnalysisResult(
-                song: song,
-                artist: "Unknown",
-                bpm: bpmValue,
-                key: keyValue,
-                success: true,
-                duration: 0
-            )
-            results.append(result)
-        }
-        return results
-    }
-    
-    private func loadAnalysisResults(fromCSV csvPath: String) -> [AnalysisResult] {
-        var resolvedPath = csvPath
-        if !resolvedPath.hasPrefix("/") {
-            resolvedPath = (projectPath as NSString).appendingPathComponent(csvPath)
-        }
-        guard FileManager.default.fileExists(atPath: resolvedPath) else {
-            return []
-        }
-        guard let csvString = try? String(contentsOfFile: resolvedPath, encoding: .utf8) else {
-            return []
-        }
-        let rows = csvString.components(separatedBy: .newlines).filter { !$0.isEmpty }
-        guard rows.count > 1 else {
-            return []
-        }
-        var results: [AnalysisResult] = []
-        for row in rows.dropFirst() {
-            let columns = parseCSVRow(row)
-            guard columns.count >= 10 else { continue }
-            let rawSong = columns[1].replacingOccurrences(of: "\"", with: "")
-            let song = cleanSongTitle(rawSong)
-            let artist = columns[2].replacingOccurrences(of: "\"", with: "").trimmingCharacters(in: .whitespaces)
-            let successValue = columns[4].lowercased()
-            let success = successValue == "true" || successValue == "1" || successValue == "yes"
-            let duration = Double(columns[5]) ?? 0
-            let bpmValue: Int? = {
-                if let bpmDouble = Double(columns[6]) {
-                    return Int(round(bpmDouble))
-                }
-                return nil
-            }()
-            let keyValue = columns[7].trimmingCharacters(in: .whitespaces)
-            let key = keyValue.isEmpty ? nil : keyValue
-            let result = AnalysisResult(
-                song: song,
-                artist: artist,
-                bpm: bpmValue,
-                key: key,
-                success: success,
-                duration: duration
-            )
-            results.append(result)
-        }
-        return results
-    }
-    
-    private func cleanSongTitle(_ raw: String) -> String {
-        SongTitleNormalizer.clean(raw)
-    }
-    
-    private func parseCSVRow(_ row: String) -> [String] {
-        var columns: [String] = []
-        var current = ""
-        var insideQuotes = false
-        for char in row {
-            if char == "\"" {
-                insideQuotes.toggle()
-                continue
-            }
-            if char == "," && !insideQuotes {
-                columns.append(current)
-                current = ""
-            } else {
-                current.append(char)
-            }
-        }
-        columns.append(current)
-        return columns
-    }
-    
     func runAllTests() async {
         for test in ABCDTestType.allCases {
             await runTest(test)
@@ -369,55 +255,4 @@ class ABCDTestRunner: ObservableObject {
         }
     }
     
-    private func runCommand(_ command: String, arguments: [String]) async -> String {
-        return await withCheckedContinuation { continuation in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: command)
-            process.arguments = arguments
-            process.currentDirectoryURL = URL(fileURLWithPath: projectPath)
-            
-            // Set up environment to ensure script can find python and venv
-            var environment = ProcessInfo.processInfo.environment
-            environment["PATH"] = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:\(projectPath)/.venv/bin"
-            environment["VIRTUAL_ENV"] = "\(projectPath)/.venv"
-            process.environment = environment
-            
-            let outputPipe = Pipe()
-            process.standardOutput = outputPipe
-            process.standardError = outputPipe
-            
-            addOutput("🔧 Executing: \(command) \(arguments.joined(separator: " "))")
-            addOutput("🔧 Working directory: \(projectPath)")
-            
-            do {
-                try process.run()
-                process.waitUntilExit()
-                
-                let exitCode = process.terminationStatus
-                addOutput("🔧 Exit code: \(exitCode)")
-                
-                let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-                continuation.resume(returning: output)
-            } catch {
-                let errorMsg = "Error: \(error.localizedDescription)"
-                addOutput("❌ \(errorMsg)")
-                continuation.resume(returning: errorMsg)
-            }
-        }
-    }
-    
-    func addOutput(_ line: String) {
-        outputLines.append(line)
-        
-        // Keep only last 1000 lines
-        if outputLines.count > 1000 {
-            outputLines.removeFirst(outputLines.count - 1000)
-        }
-    }
-    
-    func clearOutput() {
-        outputLines.removeAll()
-        addOutput("Output cleared")
-    }
 }

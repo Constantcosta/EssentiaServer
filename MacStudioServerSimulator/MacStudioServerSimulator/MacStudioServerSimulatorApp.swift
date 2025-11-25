@@ -20,7 +20,7 @@ struct MacStudioServerSimulatorApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ServerManagementView()
+            ServerManagementView(manager: serverManager)
                 .environmentObject(serverManager)
                 .frame(minWidth: 900, minHeight: 600)
         }

@@ -128,6 +128,31 @@ struct GateSettings: Hashable, Codable {
     var attack: Float = 0.001  // seconds (UI min)
     var release: Float = 0.02  // seconds (UI min)
     var active: Bool = false
+    var autoApplied: Bool = false
+    var floorDb: Float? = nil // Optional hard floor to further clamp bleed (dBFS)
+    
+    private enum CodingKeys: String, CodingKey {
+        case threshold, attack, release, active, autoApplied, floorDb
+    }
+    
+    init(threshold: Float = -24, attack: Float = 0.001, release: Float = 0.02, active: Bool = false, autoApplied: Bool = false, floorDb: Float? = nil) {
+        self.threshold = threshold
+        self.attack = attack
+        self.release = release
+        self.active = active
+        self.autoApplied = autoApplied
+        self.floorDb = floorDb
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        threshold = try container.decodeIfPresent(Float.self, forKey: .threshold) ?? -24
+        attack = try container.decodeIfPresent(Float.self, forKey: .attack) ?? 0.001
+        release = try container.decodeIfPresent(Float.self, forKey: .release) ?? 0.02
+        active = try container.decodeIfPresent(Bool.self, forKey: .active) ?? false
+        autoApplied = try container.decodeIfPresent(Bool.self, forKey: .autoApplied) ?? false
+        floorDb = try container.decodeIfPresent(Float.self, forKey: .floorDb)
+    }
 }
 
 struct StockpileMetadata: Hashable, Codable {
@@ -165,6 +190,37 @@ struct StockpileGroup: Identifiable, Hashable, Codable {
     var name: String
     var createdAt: Date = Date()
     var reviewed: Bool = false
+    var highConfidenceOverride: Bool? = nil
+    
+    private enum CodingKeys: String, CodingKey {
+        case id, name, createdAt, reviewed, highConfidenceOverride
+    }
+    
+    init(id: UUID = UUID(), name: String, createdAt: Date = Date(), reviewed: Bool = false, highConfidenceOverride: Bool? = nil) {
+        self.id = id
+        self.name = name
+        self.createdAt = createdAt
+        self.reviewed = reviewed
+        self.highConfidenceOverride = highConfidenceOverride
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try container.decode(String.self, forKey: .name)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        reviewed = try container.decodeIfPresent(Bool.self, forKey: .reviewed) ?? false
+        highConfidenceOverride = try container.decodeIfPresent(Bool.self, forKey: .highConfidenceOverride)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(reviewed, forKey: .reviewed)
+        try container.encodeIfPresent(highConfidenceOverride, forKey: .highConfidenceOverride)
+    }
 }
 
 struct StockpileManifestEntry: Codable {

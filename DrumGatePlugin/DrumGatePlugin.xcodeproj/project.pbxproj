@@ -1,0 +1,469 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		181B90436F90F6E27F991F0B /* DrumGateAudioUnit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C9C29A784647FA629A0DF3 /* DrumGateAudioUnit.swift */; };
+		1C73D615B79DFB073FD9CCFD /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 566F2CF095168D677299E3E0 /* App.swift */; };
+		301DB6E7AFFF14704E581FAC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 482972D14D7377D35A0EABD4 /* ContentView.swift */; };
+		33F19C707B3D314715C3769F /* DrumGateCore in Frameworks */ = {isa = PBXBuildFile; productRef = 65487902D1EE631BBA57963F /* DrumGateCore */; };
+		48755B608668E87CA07E2F6C /* DrumGateParameters.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7146CF2FA6837742C4F320F8 /* DrumGateParameters.swift */; };
+		77C9A2AD65A9D59C4A6F24A9 /* DrumGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4504EF73C3097AF65A70994 /* DrumGateView.swift */; };
+		8CA2869E29094C82AF08CE4D /* DrumGateAudioUnitFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B725321BC0C3AB79ED068EDA /* DrumGateAudioUnitFactory.swift */; };
+		99C790ABEEE279E6248BFCC2 /* DrumGateCore in Frameworks */ = {isa = PBXBuildFile; productRef = 6EC6E77BE013D985795E54B9 /* DrumGateCore */; };
+		F99901313D5BCBE6D6FBF2F1 /* DrumGateAudioUnit.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1C0B9E529531535BB43180D2 /* DrumGateAudioUnit.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C9CACC04458487C216131173 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D28A17CB1850A9AFFED2B7F1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F8C208AC2F528A30B267041B;
+			remoteInfo = DrumGateAudioUnit;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		56856A6BB808AE70F8D76F55 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				F99901313D5BCBE6D6FBF2F1 /* DrumGateAudioUnit.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		1C0B9E529531535BB43180D2 /* DrumGateAudioUnit.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DrumGateAudioUnit.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		44C9C29A784647FA629A0DF3 /* DrumGateAudioUnit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumGateAudioUnit.swift; sourceTree = "<group>"; };
+		482972D14D7377D35A0EABD4 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		52782F8C01DE9F27BBD5EBB4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		566F2CF095168D677299E3E0 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		7146CF2FA6837742C4F320F8 /* DrumGateParameters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumGateParameters.swift; sourceTree = "<group>"; };
+		A7F45B9D046D91C89A129A31 /* DrumGateCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = DrumGateCore; path = ../DrumGateCore; sourceTree = SOURCE_ROOT; };
+		B146EAA450F757519E67FE93 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		B725321BC0C3AB79ED068EDA /* DrumGateAudioUnitFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumGateAudioUnitFactory.swift; sourceTree = "<group>"; };
+		C4504EF73C3097AF65A70994 /* DrumGateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumGateView.swift; sourceTree = "<group>"; };
+		C858147DCCA8A3107C8510A1 /* DrumGateHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DrumGateHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7E8246EA02E786FD0089D3AE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				33F19C707B3D314715C3769F /* DrumGateCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F32F81C75721E83DDFB99EBB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				99C790ABEEE279E6248BFCC2 /* DrumGateCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2FF6A2F99097C715D1475315 = {
+			isa = PBXGroup;
+			children = (
+				F069F1DE7A86D2D2E2D6D0D6 /* AudioUnit */,
+				379BB42A09AEB09EFC12A9EF /* Host */,
+				E0FD551064AC8C06F1F35899 /* Packages */,
+				D049F8884092338EB992DCF0 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		379BB42A09AEB09EFC12A9EF /* Host */ = {
+			isa = PBXGroup;
+			children = (
+				566F2CF095168D677299E3E0 /* App.swift */,
+				482972D14D7377D35A0EABD4 /* ContentView.swift */,
+				B146EAA450F757519E67FE93 /* Info.plist */,
+			);
+			path = Host;
+			sourceTree = "<group>";
+		};
+		D049F8884092338EB992DCF0 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1C0B9E529531535BB43180D2 /* DrumGateAudioUnit.appex */,
+				C858147DCCA8A3107C8510A1 /* DrumGateHost.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E0FD551064AC8C06F1F35899 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				A7F45B9D046D91C89A129A31 /* DrumGateCore */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		F069F1DE7A86D2D2E2D6D0D6 /* AudioUnit */ = {
+			isa = PBXGroup;
+			children = (
+				44C9C29A784647FA629A0DF3 /* DrumGateAudioUnit.swift */,
+				B725321BC0C3AB79ED068EDA /* DrumGateAudioUnitFactory.swift */,
+				7146CF2FA6837742C4F320F8 /* DrumGateParameters.swift */,
+				C4504EF73C3097AF65A70994 /* DrumGateView.swift */,
+				52782F8C01DE9F27BBD5EBB4 /* Info.plist */,
+			);
+			path = AudioUnit;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		EC1F6588DAA19D156621D1DB /* DrumGateHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 98301CD05274A4D3F7E2623D /* Build configuration list for PBXNativeTarget "DrumGateHost" */;
+			buildPhases = (
+				90722A23075EE1AF345D7777 /* Sources */,
+				7E8246EA02E786FD0089D3AE /* Frameworks */,
+				56856A6BB808AE70F8D76F55 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				69FE02A5F088BC4F5518F049 /* PBXTargetDependency */,
+			);
+			name = DrumGateHost;
+			packageProductDependencies = (
+				65487902D1EE631BBA57963F /* DrumGateCore */,
+			);
+			productName = DrumGateHost;
+			productReference = C858147DCCA8A3107C8510A1 /* DrumGateHost.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F8C208AC2F528A30B267041B /* DrumGateAudioUnit */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 23CA7322C0D9D8F30881F055 /* Build configuration list for PBXNativeTarget "DrumGateAudioUnit" */;
+			buildPhases = (
+				1FFA9BBC2BE500BB2B5AE081 /* Sources */,
+				F32F81C75721E83DDFB99EBB /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DrumGateAudioUnit;
+			packageProductDependencies = (
+				6EC6E77BE013D985795E54B9 /* DrumGateCore */,
+			);
+			productName = DrumGateAudioUnit;
+			productReference = 1C0B9E529531535BB43180D2 /* DrumGateAudioUnit.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D28A17CB1850A9AFFED2B7F1 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+			};
+			buildConfigurationList = 9F962716CD9043DC983FF1E1 /* Build configuration list for PBXProject "DrumGatePlugin" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 2FF6A2F99097C715D1475315;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				3A9C27D2F7A23806FC32C8D5 /* XCLocalSwiftPackageReference "../DrumGateCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F8C208AC2F528A30B267041B /* DrumGateAudioUnit */,
+				EC1F6588DAA19D156621D1DB /* DrumGateHost */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1FFA9BBC2BE500BB2B5AE081 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				181B90436F90F6E27F991F0B /* DrumGateAudioUnit.swift in Sources */,
+				8CA2869E29094C82AF08CE4D /* DrumGateAudioUnitFactory.swift in Sources */,
+				48755B608668E87CA07E2F6C /* DrumGateParameters.swift in Sources */,
+				77C9A2AD65A9D59C4A6F24A9 /* DrumGateView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		90722A23075EE1AF345D7777 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1C73D615B79DFB073FD9CCFD /* App.swift in Sources */,
+				301DB6E7AFFF14704E581FAC /* ContentView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		69FE02A5F088BC4F5518F049 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F8C208AC2F528A30B267041B /* DrumGateAudioUnit */;
+			targetProxy = C9CACC04458487C216131173 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		17217B08C7143E9A2BD930A0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Host/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.essentia.drumgate.host;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		52665677B3CF08EE36273D0F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		BFAF3006EA8A2B16EEA18279 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Host/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.essentia.drumgate.host;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		C2CCD09519B65DF214E270A0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = AudioUnit/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.essentia.drumgate.plugin;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Debug;
+		};
+		DD6A2B14BAAF5E187556810E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = AudioUnit/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.essentia.drumgate.plugin;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Release;
+		};
+		EB8997B8D5FCB4D295F950E8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		23CA7322C0D9D8F30881F055 /* Build configuration list for PBXNativeTarget "DrumGateAudioUnit" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C2CCD09519B65DF214E270A0 /* Debug */,
+				DD6A2B14BAAF5E187556810E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		98301CD05274A4D3F7E2623D /* Build configuration list for PBXNativeTarget "DrumGateHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BFAF3006EA8A2B16EEA18279 /* Debug */,
+				17217B08C7143E9A2BD930A0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9F962716CD9043DC983FF1E1 /* Build configuration list for PBXProject "DrumGatePlugin" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				52665677B3CF08EE36273D0F /* Debug */,
+				EB8997B8D5FCB4D295F950E8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		3A9C27D2F7A23806FC32C8D5 /* XCLocalSwiftPackageReference "../DrumGateCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../DrumGateCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		65487902D1EE631BBA57963F /* DrumGateCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DrumGateCore;
+		};
+		6EC6E77BE013D985795E54B9 /* DrumGateCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DrumGateCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = D28A17CB1850A9AFFED2B7F1 /* Project object */;
+}
