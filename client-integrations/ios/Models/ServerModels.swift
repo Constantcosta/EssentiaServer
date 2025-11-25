@@ -76,7 +76,9 @@ extension ServerStats {
         
         // Handle cache_hit_rate which can be Double (from server) or String
         if let rateDouble = try? container.decode(Double.self, forKey: .cacheHitRate) {
-            cacheHitRate = String(format: "%.1f%%", rateDouble * 100)
+            // Clamp to valid range (0.0-1.0) before converting to percentage
+            let clampedRate = max(0.0, min(1.0, rateDouble))
+            cacheHitRate = String(format: "%.1f%%", clampedRate * 100)
         } else if let rateString = try? container.decode(String.self, forKey: .cacheHitRate) {
             cacheHitRate = rateString
         } else {

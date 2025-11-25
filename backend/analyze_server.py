@@ -360,8 +360,9 @@ def analyze_audio(audio_url, title, artist):
             beat_strengths = onset_env[beats]
             std_val = float(np.std(beat_strengths))
             mean_val = float(np.mean(beat_strengths))
-            bpm_confidence = 1.0 - min(std_val / (mean_val + 1e-6), 1.0)
-            bpm_confidence = float(max(0.0, min(1.0, bpm_confidence)))
+            # Calculate confidence: lower variance relative to mean = higher confidence
+            variance_ratio = std_val / (mean_val + 1e-6)
+            bpm_confidence = float(max(0.0, min(1.0, 1.0 - variance_ratio)))
         else:
             bpm_confidence = 0.0
         
