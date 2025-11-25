@@ -101,34 +101,33 @@ def validate_api_key(api_key):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    cursor.execute('SELECT id, active, daily_limit FROM api_keys WHERE key = ?', (api_key,))
-    result = cursor.fetchone()
-    conn.close()
-    
-    if not result:
-        return False
-    
-    key_id, active, daily_limit = result
-    
-    if not active:
-        return False
-    
-    # Check daily usage limit
-    if daily_limit > 0:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT COUNT(*) FROM api_usage 
-            WHERE api_key_id = ? AND DATE(timestamp) = DATE('now')
-        ''', (key_id,))
-        daily_usage = cursor.fetchone()[0]
-        conn.close()
+    try:
+        cursor.execute('SELECT id, active, daily_limit FROM api_keys WHERE key = ?', (api_key,))
+        result = cursor.fetchone()
         
-        if daily_usage >= daily_limit:
-            logger.warning(f"⚠️ Daily limit reached for key {api_key[:8]}...")
+        if not result:
             return False
-    
-    return True
+        
+        key_id, active, daily_limit = result
+        
+        if not active:
+            return False
+        
+        # Check daily usage limit (reuse the same connection)
+        if daily_limit > 0:
+            cursor.execute('''
+                SELECT COUNT(*) FROM api_usage 
+                WHERE api_key_id = ? AND DATE(timestamp) = DATE('now')
+            ''', (key_id,))
+            daily_usage = cursor.fetchone()[0]
+            
+            if daily_usage >= daily_limit:
+                logger.warning(f"⚠️ Daily limit reached for key {api_key[:8]}...")
+                return False
+        
+        return True
+    finally:
+        conn.close()
 
 def check_rate_limit(api_key):
     """Check and update rate limit for API key"""
@@ -361,20 +360,11 @@ def analyze_audio(audio_url, title, artist):
             beat_strengths = onset_env[beats]
             std_val = float(np.std(beat_strengths))
             mean_val = float(np.mean(beat_strengths))
-            bpm_confidence = std_val / (mean_val + 1e-6)
-            bpm_confidence = float(max(0.0, min(1.0, 1.0 - bpm_confidence)))
+            # Calculate confidence: lower variance relative to mean = higher confidence
+            variance_ratio = std_val / (mean_val + 1e-6)
+            bpm_confidence = float(max(0.0, min(1.0, 1.0 - variance_ratio)))
         else:
             bpm_confidence = 0.0
-            
-            # Additional confidence boost from beat strength consistency
-            if len(beats) > 0:
-                beat_strengths = onset_env[beats]
-                std_val = float(np.std(beat_strengths))
-                mean_val = float(np.mean(beat_strengths))
-                beat_consistency = 1.0 - min(std_val / (mean_val + 1e-6), 1.0)
-                bpm_confidence = float((bpm_confidence + beat_consistency) / 2)  # Average both confidence measures
-            
-            bpm_confidence = float(max(0.0, min(1.0, bpm_confidence)))
         
         # 2. KEY DETECTION
         chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
@@ -410,17 +400,15 @@ def analyze_audio(audio_url, title, artist):
         spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
         avg_centroid = float(np.mean(spectral_centroid))
         
-        # Acousticness (inverse of brightness + percussiveness)
-        spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)
-        brightness = float(np.mean(spectral_centroid)) / 4000.0
+        # Acousticness (inverse of brightness) - reuse avg_centroid
+        brightness = avg_centroid / 4000.0
         acousticness = 1.0 - min(brightness, 1.0)
         
         # Danceability (beat strength + regularity)
         tempogram = librosa.feature.tempogram(onset_envelope=onset_env, sr=sr)
         beat_strength = float(np.mean(tempogram))
         tempogram_std = float(np.std(tempogram))
-        tempogram_mean = float(np.mean(tempogram))
-        beat_regularity = 1.0 - (tempogram_std / (tempogram_mean + 1e-6))
+        beat_regularity = 1.0 - (tempogram_std / (beat_strength + 1e-6))
         danceability = min((beat_strength * 2 + beat_regularity) / 2, 1.0)
         
         duration = time.time() - start_time
@@ -673,16 +661,15 @@ def analyze_data():
             spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
             avg_centroid = float(np.mean(spectral_centroid))
             
-            # Acousticness (inverse of brightness)
-            brightness = float(np.mean(spectral_centroid)) / 4000.0
+            # Acousticness (inverse of brightness) - reuse avg_centroid
+            brightness = avg_centroid / 4000.0
             acousticness = 1.0 - min(brightness, 1.0)
             
             # Danceability (beat strength + regularity)
             tempogram = librosa.feature.tempogram(onset_envelope=onset_env, sr=sr)
             beat_strength = float(np.mean(tempogram))
             tempogram_std = float(np.std(tempogram))
-            tempogram_mean = float(np.mean(tempogram))
-            beat_regularity = 1.0 - (tempogram_std / (tempogram_mean + 1e-6))
+            beat_regularity = 1.0 - (tempogram_std / (beat_strength + 1e-6))
             danceability = min((beat_strength * 2 + beat_regularity) / 2, 1.0)
             
             duration = time.time() - start_time
